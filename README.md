@@ -113,6 +113,6 @@ voting-subsystem/
 
 2. **Using Docker directly**
    ```bash
-   docker build -t securebank .
-   docker run -p 3000:3000 securebank
+   docker build -t inte2667_electronic_vote .
+   docker run -p 3000:3000 inte2667_electronic_vote
    ```
