@@ -67,62 +67,12 @@ evp/                                    ← root of the group repo
 ├── docker-compose.yml
 └── .env
 
-## 🛠️ Installation and Setup
+## Subsytems 🛠🛠
 
-### Prerequisites
+Enrollment subsystem          Voting subsystem
+─────────────────────         ────────────────────────
+Creates Voter record          Reads Voter record
+Sets is_enrolled = True  →→→  Checks is_enrolled
+Sets has_voted = False        Sets has_voted = True
+Stores electorate/state  →→→  Uses to serve correct ballot
 
-- Python 3.8+
-- Docker (optional, for containerized deployment)
-- Git
-
-### Method 1: Local Development Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd PythonRestBankingApp
-   ```
-
-2. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env file with your configuration
-   ```
-
-5. **Initialize the database**
-   ```bash
-   python -c "from app import create_app, db; app = create_app(); app.app_context().push(); db.create_all()"
-   ```
-
-6. **Run the application**
-   ```bash
-   python run.py
-   ```
-
-7. **Access the application**
-   - Web Interface: http://localhost:3000
-   - API Documentation: http://localhost:3000/health
-
-### Method 2: Docker Deployment
-
-1. **Using Docker Compose (Recommended)**
-   ```bash
-   docker-compose up -d
-   ```
-
-2. **Using Docker directly**
-   ```bash
-   docker build -t inte2667_electronic_vote .
-   docker run -p 3000:3000 inte2667_electronic_vote
-   ```
