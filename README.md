@@ -20,42 +20,52 @@ This is a full stack application with:
 
 ## 📁 Project Structure
 
-voting-subsystem/
+evp/                                    ← root of the group repo
 │
 ├── app/
-│   ├── __init__.py
-│   ├── routes/
-│   │   ├── auth.py          # voter authentication, token issuance
-│   │   ├── ballot.py        # ballot presentation
-│   │   ├── vote.py          # vote submission
-│   │   └── verify.py        # vote verification
+│   ├── __init__.py                     ← shared app factory — registers BOTH blueprints
 │   │
 │   ├── models/
-│   │   ├── voter.py         # voter record, has_voted flag
-│   │   ├── ballot.py        # ballot structure
-│   │   └── vote.py          # encrypted vote record
+│   │   ├── __init__.py
+│   │   ├── user.py                     ← shared Voter/User model (enrollment creates it,
+│   │   │                                  voting reads it — ONE source of truth)
+│   │   ├── enrollment_models.py        ← enrollment-specific models
+│   │   └── voting_models.py            ← your voting-specific models
+│   │
+│   ├── routes/
+│   │   ├── __init__.py
+│   │   ├── enrollment.py               ← enrollment blueprint (/enrollment/...)
+│   │   ├── auth.py                     ← shared auth blueprint (/auth/...)
+│   │   └── voting.py                   ← your voting blueprint (/voting/...)
 │   │
 │   ├── security/
-│   │   ├── token.py         # one-time voting token generation/validation
-│   │   ├── csrf.py          # CSRF token management
-│   │   ├── encryption.py    # vote encryption at rest
-│   │   └── rate_limiter.py  # rate limiting
+│   │   ├── __init__.py
+│   │   ├── shared_security.py          ← shared: JWT validation, rate limiter, CSRF
+│   │   ├── enrollment_security.py      ← enrollment-specific security
+│   │   └── voting_security.py          ← your voting-specific security
 │   │
-│   └── database/
-│       └── db.py            # parameterised query helpers
+│   └── templates/
+│       ├── base.html                   ← shared base template
+│       ├── enrollment/                 ← enrollment templates
+│       │   ├── register.html
+│       │   └── status.html
+│       └── voting/                     ← your voting templates
+│           ├── ballot_house.html
+│           ├── ballot_senate.html
+│           └── confirmation.html
 │
 ├── tests/
-│   ├── test_token.py        # one-time token tests
-│   ├── test_double_vote.py  # prevent voting twice
-│   ├── test_csrf.py         # CSRF protection tests
-│   ├── test_sql_injection.py # parameterised query tests
-│   └── test_ballot.py       # ballot validation tests
+│   ├── test_enrollment_security.py     ← enrollment tests
+│   └── test_voting_security.py         ← your voting tests
 │
-├── requirements.txt
-├── README.md
-└── .github/
-    └── workflows/
-        └── security-tests.yml  # CI/CD pipeline
+├── .github/
+│   └── workflows/
+│       └── security-tests.yml          ← CI/CD runs ALL tests
+│
+├── requirements.txt                    ← shared dependencies
+├── run.py                              ← single entry point for both subsystems
+├── docker-compose.yml
+└── .env
 
 ## 🛠️ Installation and Setup
 
