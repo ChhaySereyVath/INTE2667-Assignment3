@@ -3,7 +3,34 @@ from flask import jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from app import db
+from datetime import datetime, timezone
 
+class Clock:
+    """The app's only source of "now". Tests can freeze it to check expiry rules."""
+
+    def __init__(self):
+        self._frozen = None
+
+    def now(self):
+        # Naive UTC datetime, because SQLite stores datetimes without a timezone
+        return self._frozen or datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def freeze(self, when):
+        self._frozen = when
+
+    def advance(self, delta):
+        self._frozen = self.now() + delta
+
+    def unfreeze(self):
+        self._frozen = None
+
+
+clock = Clock()
+
+
+def utcnow():
+    """Current time in UTC. Use this everywhere instead of datetime.utcnow()."""
+    return clock.now()
 
 # S03: every error gets a short generic message and never the exception text
 GENERIC_ERRORS = {
