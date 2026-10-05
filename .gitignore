@@ -1,0 +1,19 @@
+# Secrets and local settings (S13: never in git)
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local databases and Flask instance folder
+instance/
+*.db
+
+# Editors
+.vscode/
+.idea/
+
+# Personal AI-assistant notes
+CLAUDE.md
