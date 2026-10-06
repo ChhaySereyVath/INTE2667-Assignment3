@@ -72,3 +72,10 @@ def decrypt_field(token, aad, key_name="DATA_ENC_KEY"):
 
     except Exception:
         raise ValueError("Decryption failed") from None 
+
+def record_aad(table, column, record_id):
+    """Associated data that binds a ciphertext to ONE column of ONE row.
+       A ciphertext copied to another row or column won't decrypt there."""
+
+    return f"{table}:{column}:{record_id}"
+
