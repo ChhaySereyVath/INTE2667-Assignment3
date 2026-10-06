@@ -14,6 +14,8 @@ def make_test_config(**overrides):
         "TESTING": True,
         "SECRET_KEY": secrets.token_hex(32),
         "JWT_SECRET_KEY": secrets.token_hex(32),
+        "DATA_ENC_KEY": secrets.token_hex(32),
+        "BLIND_INDEX_KEY": secrets.token_hex(32),
         "SQLALCHEMY_DATABASE_URI": "sqlite://",  # in memory: nothing is written to disk
         "PREFERRED_URL_SCHEME": "https",  # the test client uses https, so Secure cookies work
     }
