@@ -1,7 +1,13 @@
 """R01: sensitive fields are encrypted at rest, tamper-evident, and keys stay out of the data."""
 import base64
 import pytest
-from app.security.crypto import decrypt_field, encrypt_field, record_aad
+from app.security.crypto import (
+    blind_index,
+    decrypt_field, 
+    encrypt_field, 
+    record_aad,
+    normalise_identity,
+)
 
 AAD = "citizens:family_name:1111-2222"
 
@@ -66,6 +72,20 @@ def test_malformed_token_and_wrong_version_fail_with_one_generic_error(app):
         ):
             with pytest.raises(ValueError, match="^Decryption failed$"):
                 decrypt_field(bad, AAD)
-                
 
+def test_blind_index_ignores_case_and_spacing(app):
+    with app.app_context():
+        assert blind_index(" Alex   TESTPERSON") == blind_index("alex testperson")
+        assert "alex" not in blind_index("alex testperson")
+        assert len(blind_index("alex")) == 64
+
+def test_normalise_identity(app):
+    with app.app_context():
+        assert normalise_identity(
+            " Alex ",
+            "TESTPERSON",
+            "1990-04-12",
+        ) == "alex|testperson|1990-04-12"
+
+        
 
