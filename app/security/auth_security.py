@@ -1,9 +1,28 @@
 """Authentication logic: accounts, passwords, login checks and sessions (R09, R21)."""
 import click
+import bcrypt
 from flask.cli import with_appcontext
 
 from app import db
-from app.models.user import ROLES, User
+from app.models.user import BCRYPT_ROUNDS, ROLES, User
+
+_DUMMY_HASH = bcrypt.hashpw(b"dummy-password-for-timing", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
+
+def authenticate(username, password):
+    """Return the User if the username and password are right and the account is active.
+
+    Returns None in every other case, so the caller can't tell WHY it failed (R09).
+    """
+    user = User.query.filter_by(username=username).first()
+    if user is None:
+        # R09: always do a bcrypt check, even if the username doesn't exist to avoid timing attacks
+        bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+        return None
+    if not user.check_password(password):
+        return None
+    if user.status != "active":
+        return None
+    return user
 
 
 @click.command("create-user")
