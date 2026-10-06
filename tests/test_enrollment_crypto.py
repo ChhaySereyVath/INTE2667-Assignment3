@@ -1,6 +1,7 @@
 """R01: sensitive fields are encrypted at rest, tamper-evident, and keys stay out of the data."""
 import base64
 import pytest
+from app import create_app
 from app.security.crypto import (
     blind_index,
     decrypt_field, 
@@ -8,6 +9,7 @@ from app.security.crypto import (
     record_aad,
     normalise_identity,
 )
+from tests.conftest import make_test_config
 
 AAD = "citizens:family_name:1111-2222"
 
@@ -87,5 +89,31 @@ def test_normalise_identity(app):
             "1990-04-12",
         ) == "alex|testperson|1990-04-12"
 
-        
+def test_another_key_cannot_decrypt():
+    app_one = create_app(make_test_config())
+    app_two = create_app(make_test_config())
+
+    with app_one.app_context():
+        token = encrypt_field("Testperson", AAD)
+    with app_two.app_context():
+        with pytest.raises(ValueError):
+            decrypt_field(token,AAD)
+
+def test_key_never_appears_in_the_token(app):
+    with app.app_context():
+        token = encrypt_field("Testperson", AAD)
+        assert app.config["DATA_ENC_KEY"] not in token
+
+def test_app_refuses_to_start_without_encryption_keys():
+    with pytest.raises(RuntimeError):
+        create_app(make_test_config(DATA_ENC_KEY=""))
+    with pytest.raises(RuntimeError):
+        create_app(make_test_config(BLIND_INDEX_KEY=None))
+
+def test_wrong_length_key_is_rejected():
+    app = create_app(make_test_config(DATA_ENC_KEY="abcd"))
+
+    with app.app_context():
+        with pytest.raises(RuntimeError):
+            encrypt_field("x", AAD)
 
