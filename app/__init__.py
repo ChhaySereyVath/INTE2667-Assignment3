@@ -43,6 +43,7 @@ def create_app(test_config=None):
     # --- Blueprints: each subsystem registers its own here ---
 
     with app.app_context():
+        from app import models
         db.create_all()
 
     return app
