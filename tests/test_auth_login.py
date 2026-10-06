@@ -25,3 +25,17 @@ def test_to_dict_never_contains_the_hash(app):
         data = make_user().to_dict()
         assert "password_hash" not in data
         assert set(data) == {"id", "username", "role", "status"}
+
+
+def test_create_user_command_makes_an_active_account(app):
+    runner = app.test_cli_runner()
+    result = runner.invoke(
+        args=["create-user", "bob", "--role", "aec_employee"],
+        input="Correct-Horse-42\nCorrect-Horse-42\n",
+    )
+    assert result.exit_code == 0
+    with app.app_context():
+        bob = User.query.filter_by(username="bob").first()
+        assert bob.role == "aec_employee"
+        assert bob.status == "active"
+        assert bob.check_password("Correct-Horse-42")
