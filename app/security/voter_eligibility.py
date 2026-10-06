@@ -41,4 +41,3 @@ def check_voter_eligibility(voter, election):
 
 
 
-check_voter_eligibility(voter1, election2)
