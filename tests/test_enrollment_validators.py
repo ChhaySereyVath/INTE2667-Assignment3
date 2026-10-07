@@ -1,4 +1,6 @@
 """R04: invalid types, lengths, formats and values are rejected on the server."""
+import uuid
+from datetime import date
 from app.security.validators import validate
 
 SIMPLE_SCHEMA = {
@@ -48,3 +50,13 @@ def test_types_lengths_ranges_and_enums():
     assert validate({"agree": "yes"}, schema)[2] == {"agree": "must be true or false"}
     assert validate({"tags": ["a", "b", "c"]}, schema)[2] == {"tags": "must have at most 2 items"}
     assert validate({"state": "XYZ"}, schema)[2] == {"state": "is not an allowed value"}
+
+def test_uuid_and_date_rules():
+    schema = {"id": {"type": "uuid"}, "dob": {"type": "date", "max": date(2026, 1, 1)}}
+    new_id = str(uuid.uuid4())
+    ok, cleaned, _ = validate({"id": new_id, "dob": "1990-04-12"}, schema)
+    assert ok and cleaned["dob"] == date(1990, 4, 12) and str(cleaned["id"]) == new_id
+    assert not validate({"id": "12345"}, schema)[0]
+    assert not validate({"dob": "12/04/1990"}, schema)[0]
+    assert not validate({"dob": "1990-02-30"}, schema)[0]  # not a real date
+    assert not validate({"dob": "2030-01-01"}, schema)[0]  # after the max date
