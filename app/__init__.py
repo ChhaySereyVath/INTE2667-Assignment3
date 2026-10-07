@@ -1,6 +1,6 @@
 """Application factory shared by every subsystem (enrolment, auth, voting, audit)."""
 import os
-
+from datetime import timedelta
 from dotenv import load_dotenv
 from flask import Flask
 from flask_jwt_extended import JWTManager
@@ -24,6 +24,17 @@ def create_app(test_config=None):
         SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///evp.db"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         MAX_CONTENT_LENGTH=64 * 1024,  # R06: reject request bodies over 64 KB
+        # R21: the JWT lives only in an HttpOnly cookie that JavaScript can't read (S15),
+        # is sent only over HTTPS (browsers treat http://localhost as secure), is never
+        # sent by other websites (SameSite=Strict) and needs a CSRF token (S16)
+        JWT_TOKEN_LOCATION=["cookies"],
+        JWT_COOKIE_SECURE=True,
+        JWT_COOKIE_SAMESITE="Strict",
+        JWT_COOKIE_CSRF_PROTECT=True,
+        JWT_ACCESS_TOKEN_EXPIRES=timedelta(minutes=15),
+        SESSION_IDLE_MINUTES=15,
+        SESSION_ABSOLUTE_MINUTES_CITIZEN=120,
+        SESSION_ABSOLUTE_MINUTES_STAFF=480,
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
@@ -48,7 +59,7 @@ def create_app(test_config=None):
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
-    
+
     with app.app_context():
         from app import models
         db.create_all()

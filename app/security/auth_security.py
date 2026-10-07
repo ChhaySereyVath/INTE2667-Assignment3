@@ -1,10 +1,16 @@
 """Authentication logic: accounts, passwords, login checks and sessions (R09, R21)."""
-import click
+from datetime import timedelta
+
 import bcrypt
+import click
+from flask import current_app
 from flask.cli import with_appcontext
+from flask_jwt_extended import create_access_token, get_jti
 
 from app import db
+from app.models.auth_models import UserSession
 from app.models.user import BCRYPT_ROUNDS, ROLES, User
+from app.security.shared_security import utcnow
 
 _DUMMY_HASH = bcrypt.hashpw(b"dummy-password-for-timing", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
 
@@ -24,6 +30,25 @@ def authenticate(username, password):
         return None
     return user
 
+def start_session(user):
+    """Create a server-side session and a JWT tied to it. Returns the token (R21)."""
+    now = utcnow()
+    setting = "SESSION_ABSOLUTE_MINUTES_STAFF" if user.is_privileged else "SESSION_ABSOLUTE_MINUTES_CITIZEN"
+    session_row = UserSession(
+        user_id=user.id,
+        created_at=now,
+        last_activity_at=now,
+        absolute_expires_at=now + timedelta(minutes=current_app.config[setting]),
+    )
+    db.session.add(session_row)
+    db.session.flush()  # gives session_row its id before we build the token
+
+    # S06: the token is signed with JWT_SECRET_KEY. It carries only ids, never roles:
+    # roles are always read from the database on the server (R12).
+    token = create_access_token(identity=user.id, additional_claims={"sid": session_row.id, "mfa": False})
+    session_row.current_jti = get_jti(token)
+    db.session.commit()
+    return token
 
 @click.command("create-user")
 @click.argument("username")

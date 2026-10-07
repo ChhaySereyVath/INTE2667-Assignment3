@@ -1,7 +1,8 @@
 """Authentication endpoints: /auth/... (R09, R21; later R08, R10, R12)."""
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import set_access_cookies
 
-from app.security.auth_security import authenticate
+from app.security.auth_security import authenticate, start_session
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -26,4 +27,7 @@ def login():
         # R09: same message and status for unknown user, wrong password or inactive account
         return jsonify({"error": INVALID_CREDENTIALS}), 401
 
-    return jsonify({"message": "Login successful", "user": user.to_dict()}), 200
+    token = start_session(user)
+    response = jsonify({"message": "Login successful", "user": user.to_dict()})
+    set_access_cookies(response, token)  # R21: HttpOnly cookie + readable CSRF cookie
+    return response, 200
