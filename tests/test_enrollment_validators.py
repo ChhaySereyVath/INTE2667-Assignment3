@@ -1,7 +1,15 @@
 """R04: invalid types, lengths, formats and values are rejected on the server."""
 import uuid
 from datetime import date
-from app.security.validators import validate
+from app.security.validators import (
+    ADDRESS_RE,
+    EMAIL_RE,
+    NAME_RE,
+    POSTCODE_RE,
+    STATES,
+    USERNAME_RE,
+    validate,
+)
 
 SIMPLE_SCHEMA = {
     "name": {"type": str, "required": True, "max": 20},
@@ -60,3 +68,47 @@ def test_uuid_and_date_rules():
     assert not validate({"dob": "12/04/1990"}, schema)[0]
     assert not validate({"dob": "1990-02-30"}, schema)[0]  # not a real date
     assert not validate({"dob": "2030-01-01"}, schema)[0]  # after the max date
+
+ADDRESS_SCHEMA = {
+    "address_line": {"type": str, "required": True, "pattern": ADDRESS_RE},
+    "postcode": {"type": str, "required": True, "pattern": POSTCODE_RE},
+    "state": {"type": str, "required": True, "enum": STATES},
+}
+
+SQL_INJECTION = [
+    "' OR 1=1 --",
+    "'; DROP TABLE users; --",
+    "1 UNION SELECT password_hash FROM users",
+]
+
+XSS = [
+    "<script>alert(1)</script>",
+    '"><img src=x onerror=alert(1)>',
+    "javascript:alert(1)"
+]
+
+def test_address_schema_accepts_a_real_address():
+    body = {"address_line": "Unit 4/12 Example Rd", "postcode": "3053", "state": "VIC"}
+    assert validate(body, ADDRESS_SCHEMA)[0]
+
+
+def test_injection_and_script_payloads_are_rejected_by_patterns():
+    for payload in SQL_INJECTION + XSS:
+        for pattern in (NAME_RE, USERNAME_RE, POSTCODE_RE, EMAIL_RE):
+            assert not pattern.fullmatch(payload), (pattern.pattern, payload)
+        ok, _, errors = validate({"address_line": payload, "postcode": "3000", "state": "VIC"}, ADDRESS_SCHEMA)
+        assert not ok and "address_line" in errors
+
+
+def test_overlong_and_control_characters_are_rejected():
+    assert not NAME_RE.fullmatch("A" * 101)
+    assert not NAME_RE.fullmatch("Alex\x00Testperson")
+    assert not ADDRESS_RE.fullmatch("42 Example St\nDROP")
+
+
+def test_good_values_match_the_patterns():
+    assert NAME_RE.fullmatch("Zoë O'Brien-Nguyen")
+    assert USERNAME_RE.fullmatch("alex_t.2026")
+    assert EMAIL_RE.fullmatch("alex.testperson@example.com")
+    assert ADDRESS_RE.fullmatch("Unit 4/12 Example Rd, Carlton")
+    assert POSTCODE_RE.fullmatch("0800")
