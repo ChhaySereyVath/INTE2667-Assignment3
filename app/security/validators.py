@@ -1,0 +1,63 @@
+"""R04: server-side allowlist validation for every JSON request body (Part 2 solution S01).
+
+Usage:
+    SCHEMA = {
+        "postcode": {"type": str, "required": True, "pattern": POSTCODE_RE},
+        "state":    {"type": str, "required": True, "enum": STATES},
+    }
+    ok, cleaned, errors = validate(request.get_json(silent=True), SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request", "fields": errors}), 400
+"""
+
+def validate(data, schema):
+    """Check a JSON body against a schema. Returns (ok, cleaned, errors).
+
+    - The body must be a JSON object; any field not in the schema is rejected.
+    - Error messages describe the rule, never the submitted value (R02).
+    - cleaned holds the converted values (e.g. a date object) only when ok is True.
+    """
+    if not isinstance(data, dict):
+        return False, {}, {"_body": "must be a JSON object"}
+
+    errors = {}
+    cleaned = {}
+    for field in data:
+        if field not in schema:
+            errors[field] = "unknown field"  # stops clients sending e.g. "role" or "status"
+
+    for field, rule in schema.items():
+        value = data.get(field)
+        if value is None or value == "":
+            if rule.get("required"):
+                errors[field] = "required"
+            continue
+        ok, result = _check(value, rule)
+        if ok:
+            cleaned[field] = result
+        else:
+            errors[field] = result
+
+    if errors:
+        return False, {}, errors
+    return True, cleaned, {}
+
+def _check(value, rule):
+    """Check one value. Returns (True, converted value) or (False, error message)."""
+    kind = rule.get("type", str)
+
+    if kind is str:
+        if not isinstance(value, str):
+            return False, "must be text"
+
+        value = value.strip()
+
+        if "min" in rule and len(value) < rule["min"]:
+            return False, f"must be at least {rule['min']} characters"
+
+        if "max" in rule and len(value) > rule["max"]:
+            return False, f"must be at most {rule['max']} characters"
+
+        return True, value
+
+    return False, "has an unsupported type"
