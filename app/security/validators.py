@@ -58,6 +58,43 @@ def _check(value, rule):
         if "max" in rule and len(value) > rule["max"]:
             return False, f"must be at most {rule['max']} characters"
 
+        if "pattern" in rule and not rule["pattern"].fullmatch(value):
+            return False, "has an invalid format"
+
+        if "enum" in rule and value not in rule["enum"]:
+            return False, "is not an allowed value"
+        
+        return True, value
+
+    if kind is int:
+        #bool is a subclass of int in Python, so True/False must be rejected explicitly
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False, "must be a whole number"
+
+        if "min" in rule and value < rule["min"]:
+            return False, f"must be at least {rule['min']}"
+
+        if "max" in rule and value > rule["max"]:
+            return False, f"must be at most {rule['max']}"
+
+        if "enum" in rule and value not in rule["enum"]:
+            return False, "is not an allowed value"
+
+        return True, value
+
+    if kind is bool:
+        if not isinstance(value, bool):
+            return False, "must be true or false"
+
+        return True, value
+
+    if kind is list:
+        if not isinstance(value, list):
+            return False, "must be a list"
+
+        if "max" in rule and len(value) > rule["max"]:
+            return False, f"must have at most {rule['max']} items"
+
         return True, value
 
     return False, "has an unsupported type"
