@@ -43,3 +43,8 @@ def frozen_clock():
     clock.freeze(datetime(2026, 5, 2, 9, 0, 0))
     yield clock
     clock.unfreeze()
+
+def csrf_headers(client):
+    """Header that POST/PUT/PATCH/DELETE requests need after login (double-submit CSRF, S16)."""
+    cookie = client.get_cookie("csrf_access_token")
+    return {"X-CSRF-TOKEN": cookie.value}
