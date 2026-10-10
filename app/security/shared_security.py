@@ -2,8 +2,10 @@
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from flask import current_app, g, jsonify, request
+from flask import current_app, g, jsonify, redirect, request, url_for
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended.exceptions import JWTExtendedException
+from jwt import PyJWTError
 from werkzeug.exceptions import HTTPException
 
 from app import db, jwt
@@ -104,6 +106,29 @@ jwt.invalid_token_loader(authentication_required)
 jwt.expired_token_loader(authentication_required)
 jwt.revoked_token_loader(authentication_required)
 
+def page_login_required(view):
+    """Same checks as login_required, but for HTML pages: send the visitor to the
+    login page instead of a JSON 401, and never let the browser cache the page (R21)."""
+
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        from app.models.user import User
+
+        try:
+            verify_jwt_in_request()
+            user = db.session.get(User, get_jwt_identity())
+        except (JWTExtendedException, PyJWTError):
+            user = None
+        if user is None or user.status != "active":
+            return redirect(url_for("pages.login_page"))
+        g.current_session.last_activity_at = utcnow()
+        db.session.commit()
+        g.no_store = True   # read by add_security_headers below
+        g.page_user = user  # read by the nav bar in base.html
+        return view(*args, current_user=user, **kwargs)
+
+    return wrapper
+
 def register_security(app):
     """Attach the shared error handlers and security headers to the app."""
 
@@ -127,6 +152,8 @@ def register_security(app):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
-        if request.path.startswith("/auth/"):
+        # R21: account data must not sit in the browser cache or the back button
+        # after logout, which matters most on a shared polling-place computer
+        if request.path.startswith("/auth/") or g.get("no_store"):
             response.headers["Cache-Control"] = "no-store"  # R21: never cache account data
         return response

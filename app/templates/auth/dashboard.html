@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}My account - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>My account</h1>
+  <dl class="details">
+    <dt>Username</dt>
+    <dd id="username">Loading...</dd>
+    <dt>Role</dt>
+    <dd id="role">Loading...</dd>
+    <dt>Account status</dt>
+    <dd id="status">Loading...</dd>
+  </dl>
+  <p class="muted">Enrolment details appear here once the enrolment pages are built.</p>
+  <button type="button" class="button secondary" id="logout-button">Log out</button>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}

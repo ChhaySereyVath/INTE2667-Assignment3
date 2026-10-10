@@ -60,6 +60,9 @@ def create_app(test_config=None):
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
 
+    from app.routes.pages import pages_bp
+    app.register_blueprint(pages_bp)
+
     with app.app_context():
         from app import models
         db.create_all()

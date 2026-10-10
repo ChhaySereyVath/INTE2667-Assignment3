@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Log in - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Log in</h1>
+  <form id="login-form" method="post" action="/auth/login" autocomplete="on">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" maxlength="40" required autocomplete="username">
+
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" maxlength="128" required
+           autocomplete="current-password">
+
+    <button type="submit" class="button" id="login-button">Log in</button>
+  </form>
+  <p class="muted">Staff accounts need a security key after this step (R08).</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/login.js') }}"></script>
+{% endblock %}
