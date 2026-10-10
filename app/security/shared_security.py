@@ -124,8 +124,6 @@ def login_required(view):
 
     return wrapper
 
-
-
 """Attach the shared error handlers, JWT checks and security headers to the app."""
 
 @jwt.token_in_blocklist_loader
@@ -209,6 +207,26 @@ def privileged_required(view):
 
 def register_security(app):
     """Attach the shared error handlers and security headers to the app."""
+
+    @app.before_request
+    def check_request_origin():
+        """R21: 'State-changing requests require valid CSRF or request-origin evidence.'
+
+        The CSRF token is the first defence (flask-jwt-extended checks it). This is
+        the second: a state-changing request that carries our session cookie must
+        also say it came from our own site.
+        """
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return None
+        if "access_token_cookie" not in request.cookies:
+            return None  # no session to abuse, so there is nothing to protect here
+        origin = request.headers.get("Origin") or request.headers.get("Referer")
+        if not origin:
+            return jsonify({"error": GENERIC_ERRORS[403]}), 403
+        expected = request.host_url.rstrip("/")
+        if origin != expected and not origin.startswith(expected + "/"):
+            return jsonify({"error": GENERIC_ERRORS[403]}), 403
+        return None
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):

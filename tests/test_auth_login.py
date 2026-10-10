@@ -41,7 +41,12 @@ def test_create_user_command_makes_an_active_account(app):
         assert bob.check_password("Correct-Horse-42")
 
 def login(client, username, password):
-    return client.post("/auth/login", json={"username": username, "password": password})
+    # a browser always sends Origin on a fetch POST, so the helper does too (R21)
+    return client.post(
+        "/auth/login",
+        json={"username": username, "password": password},
+        headers={"Origin": "https://localhost"},
+    )
 
 
 def test_correct_login_succeeds(app, client):

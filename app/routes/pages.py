@@ -17,7 +17,6 @@ def login_page():
     """Login form. The form posts to /auth/login with fetch()."""
     return render_template("auth/login.html")
 
-
 @pages_bp.route("/timeout")
 def timeout_page():
     """Shown after the idle timer signs someone out."""

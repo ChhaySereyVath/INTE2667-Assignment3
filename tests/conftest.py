@@ -66,3 +66,13 @@ def verify_mfa(app):
             row.mfa_verified = True
             row.mfa_verified_at = utcnow()
         db.session.commit()
+
+# the test client's own address; the Origin check compares against it (R21)
+TEST_ORIGIN = "https://localhost"
+
+
+def csrf_headers(client):
+    """Headers a state-changing request needs after login: the CSRF token (S16) and
+    an Origin that matches our own site (R21)."""
+    cookie = client.get_cookie("csrf_access_token")
+    return {"X-CSRF-TOKEN": cookie.value, "Origin": TEST_ORIGIN}

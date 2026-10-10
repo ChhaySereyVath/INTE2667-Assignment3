@@ -36,6 +36,16 @@ def create_app(test_config=None):
         SESSION_ABSOLUTE_MINUTES_CITIZEN=120,
         SESSION_ABSOLUTE_MINUTES_STAFF=480,
         REQUIRE_MFA_FOR_PRIVILEGED=True,
+        ACTIVATION_TOKEN_HOURS=24,
+        PASSWORD_MIN_LENGTH=12,
+        # R09: a wrong password from one computer locks that computer out of that
+        # account for 15 minutes. The account-wide limit only ever causes a short
+        # delay, so nobody can lock a voter out of their own account for good.
+        LOGIN_MAX_FAILURES_PER_IP=5,
+        LOGIN_LOCK_MINUTES_PER_IP=15,
+        LOGIN_MAX_FAILURES_PER_ACCOUNT=20,
+        LOGIN_LOCK_MINUTES_PER_ACCOUNT=5,
+        LOGIN_FAILURE_WINDOW_MINUTES=60,
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
@@ -54,8 +64,6 @@ def create_app(test_config=None):
 
     from app.security.auth_security import create_user_command
     app.cli.add_command(create_user_command) # R09: CLI command to create a test account
-
-    
 
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp

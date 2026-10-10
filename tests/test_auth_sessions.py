@@ -4,7 +4,7 @@ from app.models.auth_models import UserSession
 from app.security.shared_security import utcnow
 from tests.test_auth_login import login, make_user
 from datetime import timedelta
-from tests.conftest import csrf_headers
+from tests.conftest import TEST_ORIGIN, csrf_headers
 
 
 def test_session_ids_are_random_and_unique(app):
@@ -82,7 +82,8 @@ def test_logout_needs_the_csrf_token(app, client):
     with app.app_context():
         make_user()
     login(client, "alice", "Correct-Horse-42")
-    assert client.post("/auth/logout").status_code == 401  # no X-CSRF-TOKEN header
+    # a correct Origin but no X-CSRF-TOKEN header: the CSRF check alone must refuse it (S16)
+    assert client.post("/auth/logout", headers={"Origin": TEST_ORIGIN}).status_code == 401
     assert client.get("/auth/me").status_code == 200  # still logged in
 
 def test_logout_ends_the_session_on_the_server(app, client):
@@ -98,3 +99,68 @@ def test_logout_ends_the_session_on_the_server(app, client):
     # Replaying the old cookie must fail: the session is revoked on the server
     client.set_cookie("access_token_cookie", stolen_token, secure=True, httponly=True)
     assert client.get("/auth/me").status_code == 401
+
+
+
+def test_rotating_a_session_invalidates_the_previous_token(app, client):
+    """R21: 'Session identifiers rotate after login and privilege changes.'"""
+    from app.security.auth_security import rotate_session
+
+    with app.app_context():
+        make_user()
+    login(client, "alice", "Correct-Horse-42")
+    with app.app_context():
+        row = UserSession.query.one()
+        session_id, deadline = row.id, row.absolute_expires_at
+        new_token = rotate_session(row, mfa_verified=True)
+
+    assert client.get("/auth/me").status_code == 401  # the old cookie is dead
+    client.set_cookie("access_token_cookie", new_token, secure=True, httponly=True)
+    assert client.get("/auth/me").status_code == 200
+
+    with app.app_context():
+        row = UserSession.query.one()
+        assert row.mfa_verified is True
+        # rotation must not extend the absolute deadline
+        assert row.id == session_id and row.absolute_expires_at == deadline
+
+
+
+def test_revoking_all_sessions_signs_out_every_device(app):
+    from app.models.user import User
+    from app.security.auth_security import revoke_all_sessions
+
+    with app.app_context():
+        make_user()
+    phone, laptop = app.test_client(), app.test_client()
+    login(phone, "alice", "Correct-Horse-42")
+    login(laptop, "alice", "Correct-Horse-42")
+    assert phone.get("/auth/me").status_code == 200
+    assert laptop.get("/auth/me").status_code == 200
+
+    with app.app_context():
+        alice = User.query.filter_by(username="alice").one()
+        assert revoke_all_sessions(alice, "tested") == 2
+    assert phone.get("/auth/me").status_code == 401
+    assert laptop.get("/auth/me").status_code == 401
+
+
+
+def test_a_state_changing_request_from_another_site_is_refused(app, client):
+    """R21: 'State-changing requests require valid CSRF or request-origin evidence.'"""
+    with app.app_context():
+        make_user()
+    login(client, "alice", "Correct-Horse-42")
+    headers = csrf_headers(client)
+    headers["Origin"] = "https://evil.example.com"
+    assert client.post("/auth/logout", headers=headers).status_code == 403
+    assert client.get("/auth/me").status_code == 200  # still signed in
+
+
+def test_a_state_changing_request_with_no_origin_is_refused(app, client):
+    with app.app_context():
+        make_user()
+    login(client, "alice", "Correct-Horse-42")
+    token = client.get_cookie("csrf_access_token").value
+    assert client.post("/auth/logout", headers={"X-CSRF-TOKEN": token}).status_code == 403
+    assert client.get("/auth/me").status_code == 200

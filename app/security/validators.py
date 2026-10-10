@@ -13,7 +13,6 @@ import re
 import uuid
 from datetime import date
 
-
 # Shared patterns: re.fullmatch is used, so the whole value must match
 NAME_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ' -]{1,100}")
 USERNAME_RE = re.compile(r"[A-Za-z0-9_.-]{3,40}")
@@ -21,7 +20,6 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,
 ADDRESS_RE = re.compile(r"[A-Za-z0-9À-ÖØ-öø-ÿ ,./'#-]{3,120}")
 POSTCODE_RE = re.compile(r"\d{4}")
 STATES = ("NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT")
-
 
 def validate(data, schema):
     """Check a JSON body against a schema. Returns (ok, cleaned, errors).
