@@ -43,3 +43,36 @@ def frozen_clock():
     clock.freeze(datetime(2026, 5, 2, 9, 0, 0))
     yield clock
     clock.unfreeze()
+
+def csrf_headers(client):
+    """Header that POST/PUT/PATCH/DELETE requests need after login (double-submit CSRF, S16)."""
+    cookie = client.get_cookie("csrf_access_token")
+    return {"X-CSRF-TOKEN": cookie.value}
+
+
+
+def verify_mfa(app):
+    """Mark every live session as MFA-verified.
+
+    Round 3 builds the real WebAuthn flow (R08). Until then, tests for staff and
+    admin routes use this to say "this session passed MFA".
+    """
+    from app import db
+    from app.models.auth_models import UserSession
+    from app.security.shared_security import utcnow
+
+    with app.app_context():
+        for row in UserSession.query.filter_by(revoked_at=None).all():
+            row.mfa_verified = True
+            row.mfa_verified_at = utcnow()
+        db.session.commit()
+
+# the test client's own address; the Origin check compares against it (R21)
+TEST_ORIGIN = "https://localhost"
+
+
+def csrf_headers(client):
+    """Headers a state-changing request needs after login: the CSRF token (S16) and
+    an Origin that matches our own site (R21)."""
+    cookie = client.get_cookie("csrf_access_token")
+    return {"X-CSRF-TOKEN": cookie.value, "Origin": TEST_ORIGIN}

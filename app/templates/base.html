@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Australian Electronic Voting Platform{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body data-idle-minutes="{{ idle_minutes }}">
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('pages.index') }}">AEC Voting Platform</a>
+    <nav>
+      <a href="{{ url_for('pages.index') }}">Home</a>
+        {% if signed_in %}
+            <a href="{{ url_for('pages.dashboard') }}">My account</a>
+        {% else %}
+            <a href="{{ url_for('pages.login_page') }}">Log in</a>
+        {% endif %}
+    </nav>
+  </header>
+
+  <main class="container">
+    <div id="alert" class="alert" hidden></div>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <p>Prototype for INTE2667 Assignment 3. Not a real electoral system.</p>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
