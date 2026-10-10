@@ -48,3 +48,21 @@ def csrf_headers(client):
     """Header that POST/PUT/PATCH/DELETE requests need after login (double-submit CSRF, S16)."""
     cookie = client.get_cookie("csrf_access_token")
     return {"X-CSRF-TOKEN": cookie.value}
+
+
+
+def verify_mfa(app):
+    """Mark every live session as MFA-verified.
+
+    Round 3 builds the real WebAuthn flow (R08). Until then, tests for staff and
+    admin routes use this to say "this session passed MFA".
+    """
+    from app import db
+    from app.models.auth_models import UserSession
+    from app.security.shared_security import utcnow
+
+    with app.app_context():
+        for row in UserSession.query.filter_by(revoked_at=None).all():
+            row.mfa_verified = True
+            row.mfa_verified_at = utcnow()
+        db.session.commit()

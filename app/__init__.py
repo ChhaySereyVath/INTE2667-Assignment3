@@ -35,6 +35,7 @@ def create_app(test_config=None):
         SESSION_IDLE_MINUTES=15,
         SESSION_ABSOLUTE_MINUTES_CITIZEN=120,
         SESSION_ABSOLUTE_MINUTES_STAFF=480,
+        REQUIRE_MFA_FOR_PRIVILEGED=True,
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)

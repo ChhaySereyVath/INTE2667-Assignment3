@@ -24,3 +24,25 @@ class UserSession(db.Model):
 
     def __repr__(self):
         return f"<UserSession {self.id} user={self.user_id}>"
+
+    
+
+class StaffAssignment(db.Model):
+    """R12/R11: which state an AEC employee may work in. Without a row here a
+    staff member has a role but no records to use it on (least privilege)."""
+
+    __tablename__ = "staff_assignments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    state = db.Column(db.String(3), nullable=False)
+    granted_by = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    granted_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "state", name="uq_staff_state"),)
+
+
+def user_states(user):
+    """The states this user may act in. Austin's record checks call this (R11)."""
+    rows = StaffAssignment.query.filter_by(user_id=user.id).all()
+    return tuple(row.state for row in rows)

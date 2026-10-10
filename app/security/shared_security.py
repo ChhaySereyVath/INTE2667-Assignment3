@@ -49,6 +49,47 @@ GENERIC_ERRORS = {
     500: "An unexpected error occurred",
 }
 
+# R12: the whole permission model in one place. A role that is not listed, or a
+# permission that is not listed for a role, is DENIED. There is no wildcard.
+ROLE_PERMISSIONS = {
+    "citizen": frozenset({
+        "enrolment:self:read",
+        "enrolment:self:enrol",
+        "enrolment:self:update_address",
+    }),
+    "aec_employee": frozenset({
+        "enrolment:staff:read",
+        "enrolment:staff:register",
+    }),
+    "commissioner_delegate": frozenset({
+        "enrolment:staff:read",
+        "enrolment:staff:register",
+        "enrolment:staff:approve",
+        "enrolment:history:read_sensitive",
+    }),
+    "administrator": frozenset({
+        "admin:user:create",
+        "admin:role:grant",
+        "admin:recovery:approve",
+    }),
+    "auditor": frozenset({
+        "audit:log:read",
+    }),
+}
+
+# R12: least privilege. An administrator manages accounts; they do not get to read
+# or change enrolment records, and nobody inherits another role's permissions.
+PRIVILEGED_PERMISSIONS = frozenset(
+    ROLE_PERMISSIONS["aec_employee"]
+    | ROLE_PERMISSIONS["commissioner_delegate"]
+    | ROLE_PERMISSIONS["administrator"]
+)
+
+
+def has_permission(user, permission):
+    """R12: deny by default. An unknown role has no permissions at all."""
+    return permission in ROLE_PERMISSIONS.get(user.role, frozenset())
+
 def session_is_valid(session_row, jti):
     """R21: a token only works while its server-side session is alive."""
     if session_row is None or session_row.revoked_at is not None:
@@ -128,6 +169,43 @@ def page_login_required(view):
         return view(*args, current_user=user, **kwargs)
 
     return wrapper
+
+def permission_required(permission):
+    """R12: the route states the one permission it needs. The check runs on the
+    server, from the role stored in the database, never from anything the client sends."""
+
+    def decorator(view):
+        @wraps(view)
+        def inner(*args, current_user, **kwargs):
+            if not has_permission(current_user, permission):
+                return jsonify({"error": GENERIC_ERRORS[403]}), 403
+            if permission in PRIVILEGED_PERMISSIONS and not _mfa_satisfied(current_user):
+                # R08: a privileged action needs more than a password
+                return jsonify({"error": GENERIC_ERRORS[403]}), 403
+            return view(*args, current_user=current_user, **kwargs)
+
+        return login_required(inner)
+
+    return decorator
+
+def _mfa_satisfied(user):
+    """R08: staff and admin sessions must be MFA-verified. Citizens are not asked."""
+    if not user.is_privileged:
+        return True
+    if not current_app.config["REQUIRE_MFA_FOR_PRIVILEGED"]:
+        return True  # only ever False in a developer setting, never in the demo
+    return bool(g.current_session.mfa_verified)
+
+def privileged_required(view):
+    """R08: any staff or admin route, even one with no specific permission."""
+
+    @wraps(view)
+    def inner(*args, current_user, **kwargs):
+        if not current_user.is_privileged or not _mfa_satisfied(current_user):
+            return jsonify({"error": GENERIC_ERRORS[403]}), 403
+        return view(*args, current_user=current_user, **kwargs)
+
+    return login_required(inner)
 
 def register_security(app):
     """Attach the shared error handlers and security headers to the app."""
