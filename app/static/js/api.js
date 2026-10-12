@@ -44,3 +44,27 @@ function clearError() {
   box.textContent = "";
   box.hidden = true;
 }
+
+// Shows a neutral message (for example "check your email"). textContent again,
+// so nothing the server sends can become markup (R04).
+function showNotice(message) {
+  const box = document.getElementById("notice");
+  if (!box) return;
+  box.textContent = message;
+  box.hidden = false;
+}
+
+// Lists the rule each field broke, e.g. "password: must be at least 12 characters".
+// The server never puts the submitted value in these messages (A05), so they are
+// safe to show.
+function showFieldErrors(fields) {
+  const list = document.getElementById("field-errors");
+  if (!list) return;
+  list.replaceChildren();
+  Object.entries(fields || {}).forEach(function ([name, rule]) {
+    const item = document.createElement("li");
+    item.textContent = name.replace(/_/g, " ") + ": " + rule;
+    list.appendChild(item);
+  });
+  list.hidden = list.children.length === 0;
+}

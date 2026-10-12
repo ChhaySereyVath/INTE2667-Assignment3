@@ -99,3 +99,14 @@ def test_pages_tell_the_browser_the_same_idle_limit_as_the_server(app, client):
     login(client, "alice", "Correct-Horse-42")
     body = client.get("/dashboard").get_data(as_text=True)
     assert f'data-idle-minutes="{app.config["SESSION_IDLE_MINUTES"]}"' in body
+
+
+def test_register_page_renders_a_form(client):
+    body = client.get("/register").get_data(as_text=True)
+    assert 'id="register-form"' in body
+    assert 'autocomplete="new-password"' in body
+    assert INLINE_SCRIPT.search(body) is None
+
+
+def test_signed_out_visitors_see_a_register_link(client):
+    assert 'href="/register"' in client.get("/").get_data(as_text=True)

@@ -31,6 +31,11 @@ def inject_session_settings():
         "signed_in": g.get("page_user") is not None,
     }
 
+@pages_bp.route("/register")
+def register_page():
+    """Registration form. Posts to /auth/register with fetch()."""
+    return render_template("auth/register.html")
+
 @pages_bp.route("/dashboard")
 @page_login_required
 def dashboard(current_user):

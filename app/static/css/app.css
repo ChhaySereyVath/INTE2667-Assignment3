@@ -75,3 +75,22 @@ input:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
 .footer { padding: 1rem; text-align: center; color: var(--muted); font-size: 0.875rem; }
 dl.details dt { font-weight: 600; margin-top: 0.75rem; }
 dl.details dd { margin: 0.15rem 0 0; }
+
+.notice {
+  border: 1px solid var(--line);
+  background: #eef4fa;
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 1rem;
+}
+.field-errors { margin: 0 0 1rem; padding-left: 1.2rem; color: var(--bad); }
+.hint { font-size: 0.875rem; color: var(--muted); margin: -0.6rem 0 1rem; }
+input[type="email"] {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+}

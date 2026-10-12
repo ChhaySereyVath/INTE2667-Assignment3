@@ -14,7 +14,8 @@
         {% if signed_in %}
             <a href="{{ url_for('pages.dashboard') }}">My account</a>
         {% else %}
-            <a href="{{ url_for('pages.login_page') }}">Log in</a>
+             <a href="{{ url_for('pages.register_page') }}">Register</a>
+             <a href="{{ url_for('pages.login_page') }}">Log in</a>
         {% endif %}
     </nav>
   </header>

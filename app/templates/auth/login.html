@@ -14,6 +14,7 @@
     <button type="submit" class="button" id="login-button">Log in</button>
   </form>
   <p class="muted">Staff accounts need a security key after this step (R08).</p>
+  <p class="muted">No account yet? <a href="{{ url_for('pages.register_page') }}">Create one</a>.</p>
 </section>
 {% endblock %}
 {% block scripts %}
