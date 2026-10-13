@@ -188,3 +188,23 @@ def test_citizens_cannot_see_the_queue(app):
     alice = citizen_client(app)
     assert alice.get("/enrollment/pending").status_code == 403
 
+# --- A27 ---
+
+def test_staff_get_the_queue_page_and_citizens_do_not(app):
+    from tests.test_auth_pages import INLINE_SCRIPT
+
+    alice = citizen_client(app)
+    assert alice.get("/staff/enrolments").headers["Location"].endswith("/dashboard")
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    response = emma.get("/staff/enrolments")
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
+    assert INLINE_SCRIPT.search(body) is None
+    assert 'id="approve-button"' not in body  # employees register; only delegates decide
+    assert 'href="/staff/enrolments"' in emma.get("/dashboard").get_data(as_text=True)
+
+
+def test_delegates_get_the_decision_buttons(app):
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    assert 'id="approve-button"' in dana.get("/staff/enrolments").get_data(as_text=True)
+

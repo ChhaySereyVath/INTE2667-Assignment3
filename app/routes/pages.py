@@ -85,4 +85,5 @@ def dashboard(current_user):
     page cannot be opened by typing the URL (R21, R11)."""
     return render_template("auth/dashboard.html",
                         can_enrol=has_permission(current_user, "enrolment:self:read"),
+                        can_staff=has_permission(current_user, "enrolment:staff:read"),
                         can_admin=has_permission(current_user, "admin:recovery:approve"))
