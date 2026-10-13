@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 
 from app import db
 from app.models.enrollment_models import Enrolment
-from app.security.enrollment_security import get_scoped_or_404, identity_key, record_change
+from app.security.enrollment_security import change_status, get_scoped_or_404, identity_key, record_change
 from app.security.shared_security import permission_required, utcnow
 from app.security.validators import ADDRESS_RE, NAME_RE, POSTCODE_RE, STATES, validate
 
@@ -37,6 +37,8 @@ ADDRESS_SCHEMA = {
 }
 
 STAFF_REGISTER_SCHEMA = dict(ENROL_SCHEMA, user_id={"type": "uuid", "required": True})
+
+DECISION_SCHEMA = {"decision": {"type": str, "required": True, "enum": ("approved", "rejected")}}
 
 def _write_enrolment(enrolment, cleaned):
     """Encrypt each field onto the row. The row must already have its id."""
@@ -141,3 +143,18 @@ def staff_register(current_user):
     if problem is not None:
         return jsonify({"error": "Already enrolled"}), 409
     return jsonify({"enrolment": enrolment.summary()}), 201
+
+@enrollment_bp.route("/<record_id>/decision", methods=["POST"])
+@permission_required("enrolment:staff:approve")
+def decide_enrolment(current_user, record_id):
+    """R03: approve or reject a pending enrolment. The person who registered it
+    cannot be the person who approves it (separation of duties)."""
+    ok, cleaned, errors = validate(request.get_json(silent=True), DECISION_SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request", "fields": errors}), 400
+
+    enrolment = get_scoped_or_404(record_id, current_user, "approve")
+    if not change_status(enrolment, current_user, cleaned["decision"]):
+        return jsonify({"error": "Access denied"}), 403
+    db.session.commit()
+    return jsonify({"enrolment": enrolment.summary()}), 200

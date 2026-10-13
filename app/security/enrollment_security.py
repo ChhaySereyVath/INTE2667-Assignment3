@@ -49,3 +49,21 @@ def record_change(enrolment, actor, action, field, old_value, new_value):
     row.new_value_enc = encrypt_field(new_value, record_aad("enrolment_history", "new_value", row.id))
     
     return row
+
+def change_status(enrolment, actor, new_status):
+    """R03: 'Unauthorised workflow transitions are rejected.'
+
+    Returns True if the move was allowed. Also enforces separation of duties: the
+    staff member who registered someone cannot be the one who approves them.
+    """
+    if new_status not in ALLOWED_TRANSITIONS.get(enrolment.status, ()):
+        return False
+    if new_status == "approved" and enrolment.registered_by == actor.id:
+        return False  # maker-checker
+    previous, enrolment.status = enrolment.status, new_status
+    enrolment.updated_at = utcnow()
+    if new_status == "approved":
+        enrolment.approved_by = actor.id
+    record_change(enrolment, actor, f"status_{new_status}", "status", previous, new_status)
+    
+    return True
