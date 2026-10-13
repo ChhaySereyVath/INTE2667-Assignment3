@@ -349,3 +349,65 @@ def test_the_backup_and_verify_commands_write_a_restore_report(app, tmp_path):
     assert "Restore test passed" in result.output
     report = next((tmp_path / "reports").glob("restore-*.md")).read_text()
     assert "**PASS**" in report and "| users | 1 |" in report and "| enrolments | 1 |" in report
+
+# --- A31 ---
+
+# Distinctive values, so a match can only mean real plaintext leaked, never chance
+SECRETS_OF_A_CITIZEN = {
+    "given_name": "Quillon",
+    "family_name": "Wexcombe",
+    "date_of_birth": "1987-11-23",
+    "address_line": "77 Marrowbank Crescent",
+    "suburb": "Brunswick",
+    "email": "q.wexcombe@example.com",
+}
+
+
+def test_no_personal_detail_is_stored_logged_or_shown_in_plain_text(app, tmp_path, caplog):
+    """R01: 'Tests confirm that plaintext sensitive data is not exposed.'
+
+    One citizen registers, activates, enrols and moves house. Then every place the
+    data could leak is searched: the database file, every log line, what staff see,
+    and a backup.
+    """
+    import json
+    import logging
+
+    from app import db
+    from app.models.auth_models import Notification
+    from app.security.backup import create_backup
+    from tests.test_auth_login import login
+
+    caplog.set_level(logging.DEBUG)
+    client = app.test_client()
+    client.post("/auth/register", json={"username": "qwex", "email": SECRETS_OF_A_CITIZEN["email"],
+                                        "password": "Correct-Horse-42"})
+    with app.app_context():
+        token = json.loads(Notification.query.filter_by(template="activation").one().payload)["token"]
+    client.post("/auth/activate", json={"token": token})
+    login(client, "qwex", "Correct-Horse-42")
+    enrol(client, given_name=SECRETS_OF_A_CITIZEN["given_name"],
+          family_name=SECRETS_OF_A_CITIZEN["family_name"],
+          date_of_birth=SECRETS_OF_A_CITIZEN["date_of_birth"])
+    client.patch("/enrollment/me/address", headers=csrf_headers(client),
+                 json={"address_line": SECRETS_OF_A_CITIZEN["address_line"],
+                       "suburb": SECRETS_OF_A_CITIZEN["suburb"], "postcode": "3056", "state": "VIC"})
+    staff = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    staff_view = staff.get("/enrollment/pending").get_data(as_text=True)
+    assert '"state":"VIC"' in staff_view.replace(" ", "")  # she really does see the record
+
+    with app.app_context():
+        raw = db.engine.raw_connection()
+        database_bytes = bytes(raw.driver_connection.serialize())
+        raw.close()
+        backup_bytes = create_backup(tmp_path).read_bytes()
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+
+    for name, value in SECRETS_OF_A_CITIZEN.items():
+        assert value.encode() not in database_bytes, f"{name} is readable in the database"
+        assert value.encode() not in backup_bytes, f"{name} is readable in a backup"
+        assert value not in log_text, f"{name} appears in a log line"
+        assert value not in staff_view, f"{name} appears in the staff queue"
+
+    # and the owner, who IS allowed to see it, still can
+    assert client.get("/enrollment/me").get_json()["enrolment"]["family_name"] == "Wexcombe"
