@@ -31,6 +31,23 @@ def timeout_page():
     """Shown after the idle timer signs someone out."""
     return render_template("auth/timeout.html")
 
+@pages_bp.route("/recover")
+def recover_page():
+    """R10 step 1: ask for a recovery link."""
+    return render_template("recovery/request.html")
+
+
+@pages_bp.route("/recover/confirm")
+def recover_confirm_page():
+    """R10 step 2: the emailed link opens this page; the token is in the fragment."""
+    return render_template("recovery/confirm.html")
+
+
+@pages_bp.route("/recover/reset")
+def recover_reset_page():
+    """R10 step 4: choose a new password with the single-use reset link."""
+    return render_template("recovery/reset.html")
+
 @pages_bp.app_context_processor
 def inject_session_settings():
     """The SERVER decides what the nav bar shows. The lab app decided it in

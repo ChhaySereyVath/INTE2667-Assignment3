@@ -276,9 +276,11 @@ def create_staff_account(created_by, username, email, role, states, temporary_pa
 
 # --- K39: the simulated inbox ------------------------------------------------------
 
-# which page each kind of message links to (Round 4 adds the recovery pages)
-LINK_PAGES = {"activation": "/activate"}
-
+LINK_PAGES = {
+    "activation": "/activate",
+    "recovery": "/recover/confirm",
+    "recovery_reset": "/recover/reset",
+}
 
 @click.command("outbox")
 @click.option("--limit", default=10, show_default=True, help="How many messages to show")

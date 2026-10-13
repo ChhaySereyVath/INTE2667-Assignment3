@@ -263,3 +263,30 @@ def test_a_weak_new_password_does_not_use_up_the_link(app, client):
     assert response.status_code == 400
     assert response.get_json()["fields"] == {"new_password": "is too common"}
     assert reset(client, token).status_code == 200  # the link still works
+
+
+
+# --- K51 ---
+
+def test_the_recovery_pages_render_without_inline_scripts(client):
+    from tests.test_auth_pages import INLINE_SCRIPT
+
+    for path, form in (("/recover", "recover-request-form"),
+                       ("/recover/confirm", "recover-confirm-form"),
+                       ("/recover/reset", "recover-reset-form")):
+        body = client.get(path).get_data(as_text=True)
+        assert f'id="{form}"' in body, path
+        assert INLINE_SCRIPT.search(body) is None, path
+
+
+def test_the_login_page_links_to_recovery(client):
+    assert 'href="/recover"' in client.get("/login").get_data(as_text=True)
+
+
+def test_flask_outbox_prints_working_recovery_links(app, client):
+    import re
+
+    make_account(app)
+    ask(client)
+    output = app.test_cli_runner().invoke(args=["outbox"]).output
+    assert re.search(r"/recover/confirm#token=[A-Za-z0-9_-]+", output)

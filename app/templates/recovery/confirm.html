@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Confirm it's you - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Confirm it's you</h1>
+  <div id="notice" class="notice" hidden></div>
+  <form id="recover-confirm-form">
+    <p>If you are enrolled to vote, enter the date of birth and postcode on your enrolment.
+       You have one try per link.</p>
+    <label for="date_of_birth">Date of birth</label>
+    <input type="date" id="date_of_birth" autocomplete="bday">
+    <label for="postcode">Postcode</label>
+    <input type="text" id="postcode" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+           autocomplete="postal-code">
+    <button type="submit" class="button" id="recover-confirm-button">Continue</button>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/recover.js') }}"></script>
+{% endblock %}
