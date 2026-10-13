@@ -7,7 +7,10 @@ from app.models.user import User
 from app.security.auth_security import (authenticate, clear_login_failures, create_staff_account,
                                         login_is_locked, password_problem, queue_notification,
                                         record_login_failure, redeem_token, register_account,
-                                        revoke_all_sessions, start_session)
+                                        revoke_all_sessions, rotate_session, start_session)
+from app.security.mfa_security import (authentication_options, finish_authentication,
+                                       finish_registration, has_security_key,
+                                       registration_options)
 from app.security.shared_security import login_required, permission_required, utcnow
 from app.security.validators import EMAIL_RE, STATES, USERNAME_RE, validate
 from app.models.user import User
@@ -54,7 +57,13 @@ def login():
     clear_login_failures(username, client_ip)
 
     token = start_session(user)
-    response = jsonify({"message": "Login successful", "user": user.to_dict()})
+    response = jsonify({
+        "message": "Login successful",
+        "user": user.to_dict(),
+        # R08: staff must pass MFA before this session can do anything privileged
+        "mfa_required": user.is_privileged,
+        "mfa_enrolled": user.is_privileged and has_security_key(user),
+    })
     set_access_cookies(response, token)  # R21: HttpOnly cookie + readable CSRF cookie
     return response, 200
 
@@ -167,3 +176,80 @@ def grant_role(current_user):
     revoke_all_sessions(target, "role_changed")
     queue_notification(target, "role_changed", previous_role=previous, new_role=target.role)
     return jsonify({"message": "Role updated", "user": target.to_dict()}), 200
+
+# --- R08: WebAuthn MFA ------------------------------------------------------------
+
+MFA_FAILED = "Security key check failed. Try again."
+
+
+def _mfa_staff_check(current_user, adding_key):
+    """Who may use the MFA endpoints. Returns an error response, or None if allowed.
+
+    Citizens are never asked for MFA (R08 covers staff, delegates and admins).
+    A staff member may add their FIRST key straight after signing in with their
+    password; adding any further key needs a session that already passed MFA, so a
+    stolen password cannot be used to slip in a second key.
+    """
+    if not current_user.is_privileged:
+        return jsonify({"error": "Access denied"}), 403
+    if adding_key and has_security_key(current_user) and not g.current_session.mfa_verified:
+        return jsonify({"error": "Access denied"}), 403
+    if not adding_key and not has_security_key(current_user):
+        return jsonify({"error": "No security key registered"}), 409
+    return None
+
+
+def _mfa_passed_response(message):
+    """R21: the privilege level changed, so the session gets a brand-new token."""
+    token = rotate_session(g.current_session, mfa_verified=True)
+    response = jsonify({"message": message})
+    set_access_cookies(response, token)
+    return response, 200
+
+
+@auth_bp.route("/mfa/register/begin", methods=["POST"])
+@login_required
+def mfa_register_begin(current_user):
+    """R08: options for navigator.credentials.create()."""
+    refused = _mfa_staff_check(current_user, adding_key=True)
+    if refused:
+        return refused
+    return jsonify({"options": registration_options(current_user, g.current_session)}), 200
+
+
+@auth_bp.route("/mfa/register/finish", methods=["POST"])
+@login_required
+def mfa_register_finish(current_user):
+    """R08: store the new key's public key, then treat this session as MFA-verified."""
+    refused = _mfa_staff_check(current_user, adding_key=True)
+    if refused:
+        return refused
+    credential = request.get_json(silent=True)
+    if not isinstance(credential, dict) or not finish_registration(current_user, g.current_session, credential):
+        return jsonify({"error": MFA_FAILED}), 400
+    queue_notification(current_user, "mfa_key_added")
+    return _mfa_passed_response("Security key added")
+
+
+@auth_bp.route("/mfa/authenticate/begin", methods=["POST"])
+@login_required
+def mfa_authenticate_begin(current_user):
+    """R08: options for navigator.credentials.get()."""
+    refused = _mfa_staff_check(current_user, adding_key=False)
+    if refused:
+        return refused
+    return jsonify({"options": authentication_options(current_user, g.current_session)}), 200
+
+
+@auth_bp.route("/mfa/authenticate/finish", methods=["POST"])
+@login_required
+def mfa_authenticate_finish(current_user):
+    """R08: check the key's signature. Only a valid answer raises the session to
+    MFA-verified; any failure leaves it exactly as it was."""
+    refused = _mfa_staff_check(current_user, adding_key=False)
+    if refused:
+        return refused
+    credential = request.get_json(silent=True)
+    if not isinstance(credential, dict) or not finish_authentication(current_user, g.current_session, credential):
+        return jsonify({"error": MFA_FAILED}), 400
+    return _mfa_passed_response("Security key accepted")
