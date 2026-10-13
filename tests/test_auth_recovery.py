@@ -64,6 +64,16 @@ def pending_id(app, username):
         user = User.query.filter_by(username=username).one()
         return RecoveryRequest.query.filter_by(user_id=user.id).one().id
 
+def approved_reset_token(app, username="alice"):
+    """Put a request straight into the 'approved' state and return its reset-link token,
+    so the reset step is tested on its own, without the enrolment check in step 2."""
+    from app.security.auth_security import issue_token
+
+    with app.app_context():
+        user = User.query.filter_by(username=username).one()
+        db.session.add(RecoveryRequest(user_id=user.id, status="approved"))
+        db.session.commit()
+        return issue_token(user, "recovery_reset", app.config["RECOVERY_TOKEN_HOURS"])
 
 # --- K47 ---
 
@@ -199,3 +209,57 @@ def test_a_rejected_recovery_sends_no_reset_link(app, client):
     assert latest_token(app, "recovery_reset", "emma") is None
     with app.app_context():
         assert Notification.query.filter_by(template="recovery_rejected").count() == 1
+
+# --- K50 ---
+
+def test_the_reset_changes_the_password_and_ends_every_session(app, client):
+    make_account(app)
+    laptop = app.test_client()
+    login(laptop, "alice", "Correct-Horse-42")
+    assert laptop.get("/auth/me").status_code == 200
+
+    assert reset(client, approved_reset_token(app)).status_code == 200
+
+    assert laptop.get("/auth/me").status_code == 401  # R10: existing sessions revoked
+    assert login(client, "alice", "Correct-Horse-42").status_code == 401
+    assert login(client, "alice", NEW_PASSWORD).status_code == 200
+    with app.app_context():
+        assert Notification.query.filter_by(template="recovery_completed").count() == 1
+
+
+def test_a_staff_reset_removes_their_security_keys(app, client):
+    """MFA reset: the old key is gone, so the person must add a new one."""
+    make_account(app, username="emma", role="aec_employee")
+    staff = app.test_client()
+    login(staff, "emma", "Correct-Horse-42")
+    add_key(staff, SoftAuthenticator())
+    with app.app_context():
+        assert WebAuthnCredential.query.count() == 1
+
+    ask(client, username="emma")
+    confirm(client, latest_token(app, "recovery", "emma"))
+    admin = admin_client(app)
+    admin.post(f"/auth/recovery/{pending_id(app, 'emma')}/decision",
+               json={"decision": "approved"}, headers=csrf_headers(admin))
+    assert reset(client, latest_token(app, "recovery_reset", "emma")).status_code == 200
+
+    with app.app_context():
+        assert WebAuthnCredential.query.count() == 0
+    body = login(client, "emma", NEW_PASSWORD).get_json()
+    assert body["mfa_required"] is True and body["mfa_enrolled"] is False
+
+
+def test_the_reset_link_works_once(app, client):
+    make_account(app)
+    token = approved_reset_token(app)
+    assert reset(client, token).status_code == 200
+    assert reset(client, token, password="Another-New-Horse-88").status_code == 400
+
+
+def test_a_weak_new_password_does_not_use_up_the_link(app, client):
+    make_account(app)
+    token = approved_reset_token(app)
+    response = reset(client, token, password="administrator")
+    assert response.status_code == 400
+    assert response.get_json()["fields"] == {"new_password": "is too common"}
+    assert reset(client, token).status_code == 200  # the link still works

@@ -108,3 +108,26 @@ def pending_requests():
         result.append({"id": row.id, "username": owner.username, "role": owner.role,
                        "requested_at": row.created_at.isoformat()})
     return result
+
+
+
+def complete_reset(token, new_password):
+    """Step 4: set the new password with the single-use reset link. Returns True if done.
+
+    Also removes every security key on a staff account (they must add a new one,
+    which is the MFA reset), ends every session, and tells the owner.
+    """
+    user = redeem_token(token, "recovery_reset")
+    if user is None:
+        return False
+    request_row = _latest_request(user, "approved")
+    if request_row is None:
+        return False
+
+    user.set_password(new_password)
+    WebAuthnCredential.query.filter_by(user_id=user.id).delete()
+    request_row.status, request_row.completed_at = "completed", utcnow()
+    db.session.commit()
+    revoke_all_sessions(user, "recovery")  # R21/R10: old sessions die here
+    queue_notification(user, "recovery_completed")
+    return True

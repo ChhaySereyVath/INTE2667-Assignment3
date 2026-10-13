@@ -1,9 +1,10 @@
 """Account recovery endpoints: /auth/recovery/... (R10)."""
 from flask import Blueprint, jsonify, request
 
-from app.security.recovery_security import confirm_owner, start_recovery, decide, pending_requests
+from app.security.recovery_security import confirm_owner, start_recovery, decide, pending_requests, complete_reset
 from app.security.validators import EMAIL_RE, POSTCODE_RE, validate
 from app.security.shared_security import permission_required
+from app.security.auth_security import password_problem
 
 recovery_bp = Blueprint("recovery", __name__)
 
@@ -23,6 +24,11 @@ CONFIRM_SCHEMA = {
 }
 
 DECISION_SCHEMA = {"decision": {"type": str, "required": True, "enum": ("approved", "rejected")}}
+
+RESET_SCHEMA = {
+    "token": {"type": str, "required": True, "max": 100},
+    "new_password": {"type": str, "required": True, "max": 128},
+}
 
 @recovery_bp.route("/request", methods=["POST"])
 def request_recovery():
@@ -70,3 +76,18 @@ def decide_recovery(current_user, request_id):
     if outcome == "not_found":
         return jsonify({"error": "Not found"}), 404
     return jsonify({"message": f"Recovery {data['decision']}"}), 200
+
+
+@recovery_bp.route("/reset", methods=["POST"])
+def reset_password():
+    """Step 4: choose a new password with the single-use reset link."""
+    ok, data, _ = validate(request.get_json(silent=True), RESET_SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request"}), 400
+    # check the password BEFORE using the link, so a weak choice does not burn it
+    problem = password_problem(data["new_password"])
+    if problem is not None:
+        return jsonify({"error": "Invalid request", "fields": {"new_password": problem}}), 400
+    if not complete_reset(data["token"], data["new_password"]):
+        return jsonify({"error": LINK_INVALID}), 400
+    return jsonify({"message": "Your password has been reset. Please log in again."}), 200
