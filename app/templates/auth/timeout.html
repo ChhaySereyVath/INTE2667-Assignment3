@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Signed out - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>You have been signed out</h1>
+  <p>Your session ended after {{ idle_minutes }} minutes without activity. This protects
+     your details on shared computers.</p>
+  <p><a class="button" href="{{ url_for('pages.login_page') }}">Log in again</a></p>
+</section>
+{% endblock %}

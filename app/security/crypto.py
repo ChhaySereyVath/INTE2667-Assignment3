@@ -5,6 +5,7 @@ blind_index makes a keyed fingerprint so encrypted values can still be looked up
 
 import base64
 import hashlib
+import hmac
 import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -72,3 +73,26 @@ def decrypt_field(token, aad, key_name="DATA_ENC_KEY"):
 
     except Exception:
         raise ValueError("Decryption failed") from None 
+
+def record_aad(table, column, record_id):
+    """Associated data that binds a ciphertext to ONE column of ONE row.
+       A ciphertext copied to another row or column won't decrypt there."""
+
+    return f"{table}:{column}:{record_id}"
+
+def _normalise(value):
+    """Trim, lower-case and collapse spaces, so ' Alex SMITH ' matches 'alex smith'. """
+    return " ".join(str(value).split()).lower()
+
+def blind_index(value):
+    """Keyed HMAC-SHA256 fingerprint for exact-match lookups on encrypted columns."""
+    key = _load_key("BLIND_INDEX_KEY")
+    return hmac.new(
+        key,
+        _normalise(value).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+def normalise_identity(given_name, family_name, date_of_birth):
+    """'given|family|YYYY-MM-DD', used to match a person against the citizen registry."""
+    return f"{_normalise(given_name)}|{_normalise(family_name)}|{date_of_birth}"

@@ -1,6 +1,5 @@
 """Shared User model: one account per person. Enrolment and voting add their own columns."""
 import uuid
-
 import bcrypt
 
 from app import db
@@ -10,7 +9,6 @@ ROLES = ("citizen", "aec_employee", "commissioner_delegate", "administrator", "a
 STATUSES = ("pending_activation", "active", "disabled")
 BCRYPT_ROUNDS = 12
 
-
 class User(db.Model):
     __tablename__ = "users"
 
@@ -19,6 +17,9 @@ class User(db.Model):
     password_hash = db.Column(db.String(60), nullable=False)
     role = db.Column(db.String(30), nullable=False, default="citizen")
     status = db.Column(db.String(20), nullable=False, default="pending_activation")
+    # R01: the address itself is encrypted; the blind index is what we search on
+    email_enc = db.Column(db.Text)
+    email_bidx = db.Column(db.String(64), unique=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     def set_password(self, password):

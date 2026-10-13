@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Home - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Australian Electronic Voting Platform</h1>
+  <p>Check your enrolment, update your address and vote securely.</p>
+  <p><a class="button" href="{{ url_for('pages.login_page') }}">Log in</a></p>
+</section>
+{% endblock %}
