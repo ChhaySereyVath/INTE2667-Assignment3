@@ -96,3 +96,39 @@ def test_a_citizen_updates_their_own_address_and_the_change_is_recorded(app):
         assert changed == {"address_line", "suburb", "postcode"}  # state did not change
         old, new = next(r for r in rows if r.field == "postcode").values()
         assert (old, new) == ("3053", "3065")
+
+# --- A13: record-level access control -------------------------------------------
+
+def test_changing_the_record_id_does_not_expose_another_citizen(app):
+    alice = citizen_client(app)
+    enrol(alice)
+    with app.app_context():
+        record_id = Enrolment.query.one().id
+
+    bob = citizen_client(app, username="bob")
+    # a citizen has no staff:read permission at all
+    assert bob.get(f"/enrollment/{record_id}").status_code == 403
+
+
+def test_staff_see_only_the_states_they_are_assigned_to(app):
+    alice = citizen_client(app)
+    enrol(alice)  # a VIC record
+    with app.app_context():
+        record_id = Enrolment.query.one().id
+
+    vic_staff = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    nsw_staff = staff_client(app, "noah.nsw", "aec_employee", ["NSW"])
+    assert vic_staff.get(f"/enrollment/{record_id}").status_code == 200
+    # R11: a record outside their scope looks exactly like one that does not exist
+    assert nsw_staff.get(f"/enrollment/{record_id}").status_code == 404
+    assert nsw_staff.get("/enrollment/00000000-0000-0000-0000-000000000000").status_code == 404
+
+
+def test_an_administrator_cannot_read_enrolment_records(app):
+    alice = citizen_client(app)
+    enrol(alice)
+    with app.app_context():
+        record_id = Enrolment.query.one().id
+    admin = staff_client(app, "admin1", "administrator", ["VIC"])
+    # R12 least privilege: managing accounts does not include reading enrolments
+    assert admin.get(f"/enrollment/{record_id}").status_code == 403

@@ -28,6 +28,16 @@ def can_access(user, action, enrolment):
         return False
     return enrolment.state in user_states(user)
 
+def get_scoped_or_404(record_id, user, action):
+    """Fetch a record only if this user may use it for this action (R11).
+
+    A record that exists but belongs to someone else answers 404, exactly like one
+    that does not exist, so changing the id in a request reveals nothing.
+    """
+    enrolment = db.session.get(Enrolment, str(record_id))
+    if not can_access(user, action, enrolment):
+        abort(404)
+    return enrolment
 
 def record_change(enrolment, actor, action, field, old_value, new_value):
     """R05: append one history row. Values are encrypted, bound to the row (R01)."""

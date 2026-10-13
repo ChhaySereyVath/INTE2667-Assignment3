@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 
 from app import db
 from app.models.enrollment_models import Enrolment
-from app.security.enrollment_security import identity_key, record_change
+from app.security.enrollment_security import get_scoped_or_404, identity_key, record_change
 from app.security.shared_security import permission_required, utcnow
 from app.security.validators import ADDRESS_RE, NAME_RE, POSTCODE_RE, STATES, validate
 
@@ -112,4 +112,11 @@ def update_own_address(current_user):
         enrolment.state = cleaned["state"]
     enrolment.updated_at = utcnow()
     db.session.commit()
+    return jsonify({"enrolment": enrolment.to_dict()}), 200
+
+@enrollment_bp.route("/<record_id>", methods=["GET"])
+@permission_required("enrolment:staff:read")
+def staff_read_enrolment(current_user, record_id):
+    """R11: a staff member reads a record, but only in a state they are assigned to."""
+    enrolment = get_scoped_or_404(record_id, current_user, "read")
     return jsonify({"enrolment": enrolment.to_dict()}), 200
