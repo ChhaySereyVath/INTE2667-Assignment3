@@ -24,6 +24,8 @@ def create_app(test_config=None):
         SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///evp.db"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         MAX_CONTENT_LENGTH=64 * 1024,  # R06: reject request bodies over 64 KB
+        # R05: one full federal term (3 years) plus a year's margin
+        HISTORY_RETENTION_DAYS=4 * 365,
         # R21: the JWT lives only in an HttpOnly cookie that JavaScript can't read (S15),
         # is sent only over HTTPS (browsers treat http://localhost as secure), is never
         # sent by other websites (SameSite=Strict) and needs a CSRF token (S16)
@@ -93,5 +95,8 @@ def create_app(test_config=None):
     with app.app_context():
         from app import models
         db.create_all()
+        
+        from app.models.enrollment_models import protect_history
+        protect_history(db.engine, app.config["HISTORY_RETENTION_DAYS"])
 
     return app

@@ -66,14 +66,22 @@ def get_scoped_or_404(record_id, user, action):
     return enrolment
 
 def record_change(enrolment, actor, action, field, old_value, new_value):
-    """R05: append one history row. Values are encrypted, bound to the row (R01)."""
-    row = EnrolmentHistory(enrolment_id=enrolment.id, actor_user_id=actor.id,
-                           action=action, field=field)
+    """R05: append one history row. Values are encrypted, bound to the row (R01).
+
+    The id is chosen first so the values can be encrypted against it, and the row is
+    then written in ONE insert: the database refuses any later update (A23).
+    """
+    row_id = str(uuid.uuid4())
+    row = EnrolmentHistory(
+        id=row_id,
+        enrolment_id=enrolment.id,
+        actor_user_id=actor.id,
+        action=action,
+        field=field,
+        old_value_enc=encrypt_field(old_value, record_aad("enrolment_history", "old_value", row_id)),
+        new_value_enc=encrypt_field(new_value, record_aad("enrolment_history", "new_value", row_id)),
+    )
     db.session.add(row)
-    db.session.flush()  # the row needs its id before the values can be bound to it
-    row.old_value_enc = encrypt_field(old_value, record_aad("enrolment_history", "old_value", row.id))
-    row.new_value_enc = encrypt_field(new_value, record_aad("enrolment_history", "new_value", row.id))
-    
     return row
 
 def change_status(enrolment, actor, new_status):

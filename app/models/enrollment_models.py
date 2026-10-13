@@ -98,3 +98,26 @@ class EnrolmentHistory(db.Model):
             old, new = self.values()
             data.update(old_value=old, new_value=new)
         return data
+
+def protect_history(engine, retention_days):
+    """R05: make the DATABASE refuse to change or delete history, not just the app.
+
+    Even a bug, a stray script or someone with the sqlite3 tool cannot edit a row.
+    Deleting is refused for any row still inside the retention period; only rows
+    older than that may go, through `flask purge-history`. Run at every start-up, so
+    an existing database gets the triggers too and a changed period takes effect.
+    (Keane's tamper-evident audit log, R14, covers someone dropping the triggers.)
+    """
+    days = int(retention_days)
+    statements = (
+        "DROP TRIGGER IF EXISTS enrolment_history_no_update",
+        "CREATE TRIGGER enrolment_history_no_update BEFORE UPDATE ON enrolment_history "
+        "BEGIN SELECT RAISE(ABORT, 'enrolment history is append-only'); END",
+        "DROP TRIGGER IF EXISTS enrolment_history_no_delete",
+        "CREATE TRIGGER enrolment_history_no_delete BEFORE DELETE ON enrolment_history "
+        f"WHEN OLD.created_at > datetime('now', '-{days} days') "
+        "BEGIN SELECT RAISE(ABORT, 'enrolment history is inside its retention period'); END",
+    )
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.exec_driver_sql(statement)

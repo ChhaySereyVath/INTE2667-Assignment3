@@ -57,3 +57,49 @@ def test_registering_outside_your_states_is_logged(app, caplog):
     emma.post("/enrollment/staff/register", json=dict(ENROLMENT, state="NSW", user_id=user_id),
               headers=csrf_headers(emma))
     assert any("action=register" in r.getMessage() for r in caplog.records if r.name == "evp.security")
+
+# --- A23 ---
+
+def history_rows(app):
+    from app.models.enrollment_models import EnrolmentHistory
+
+    with app.app_context():
+        return EnrolmentHistory.query.count()
+
+
+def raw_sql(app, statement):
+    """Run SQL straight at the database, the way a stray script or the sqlite3 tool would."""
+    from sqlalchemy import text
+
+    from app import db
+
+    with app.app_context():
+        try:
+            db.session.execute(text(statement))
+            db.session.commit()
+            return "allowed"
+        except Exception as error:  # noqa: BLE001
+            db.session.rollback()
+            return str(error.orig) if hasattr(error, "orig") else str(error)
+
+
+def test_the_database_refuses_to_edit_history(app):
+    vic_record(app)
+    assert history_rows(app) == 1
+    result = raw_sql(app, "UPDATE enrolment_history SET actor_user_id = 'someone-else'")
+    assert "append-only" in result
+
+
+def test_the_database_refuses_to_delete_recent_history(app):
+    vic_record(app)
+    result = raw_sql(app, "DELETE FROM enrolment_history")
+    assert "retention period" in result
+    assert history_rows(app) == 1
+
+
+def test_there_is_no_endpoint_that_changes_history(app):
+    record_id = vic_record(app)
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    for method in ("put", "patch", "delete", "post"):
+        response = getattr(dana, method)(f"/enrollment/{record_id}/history", headers=csrf_headers(dana))
+        assert response.status_code == 405
