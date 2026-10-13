@@ -208,3 +208,39 @@ def test_delegates_get_the_decision_buttons(app):
     dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
     assert 'id="approve-button"' in dana.get("/staff/enrolments").get_data(as_text=True)
 
+# --- A28 ---
+
+def test_https_responses_carry_hsts_and_plain_http_does_not(client):
+    secure = client.get("/", base_url="https://localhost")
+    assert secure.headers["Strict-Transport-Security"] == "max-age=31536000; includeSubDomains"
+    # HSTS is only meaningful over HTTPS; browsers ignore it on plain HTTP
+    assert "Strict-Transport-Security" not in client.get("/", base_url="http://localhost").headers
+
+
+def test_make_cert_writes_a_localhost_certificate_and_a_private_key(app, tmp_path):
+    import os
+    import stat
+
+    from cryptography import x509
+
+    from app.security.tls import make_dev_certificate
+
+    with app.app_context():
+        cert_path, key_path = make_dev_certificate(tmp_path)
+    certificate = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    names = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert "localhost" in names.get_values_for_type(x509.DNSName)
+    assert b"PRIVATE KEY" in key_path.read_bytes()
+    if os.name == "posix":  # Windows has no owner-only mode bits to check
+        assert stat.S_IMODE(os.stat(key_path).st_mode) == 0o600
+
+
+def test_session_cookies_are_never_sent_over_plain_http(app, client):
+    """R01: the login cookie is marked Secure, so the browser keeps it off HTTP."""
+    from tests.test_auth_login import login, make_user
+
+    with app.app_context():
+        make_user()
+    cookies = login(client, "alice", "Correct-Horse-42").headers.getlist("Set-Cookie")
+    assert all("Secure" in cookie for cookie in cookies)
+

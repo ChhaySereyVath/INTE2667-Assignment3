@@ -7,6 +7,7 @@ from flask_jwt_extended import JWTManager
 from flask_sqlalchemy import SQLAlchemy
 
 
+
 db = SQLAlchemy()
 jwt = JWTManager()
 
@@ -52,7 +53,7 @@ def create_app(test_config=None):
         # address the browser shows. A key's answer for any other origin is refused.
         WEBAUTHN_RP_ID="localhost",
         WEBAUTHN_RP_NAME="AEC Voting Platform",
-        WEBAUTHN_ORIGIN="http://localhost:5000",
+        WEBAUTHN_ORIGIN=os.environ.get("WEBAUTHN_ORIGIN", "http://localhost:5000"),
         MFA_CHALLENGE_SECONDS=120,
         RECOVERY_TOKEN_HOURS=0.5,  # R10: recovery links expire after 30 minutes
     )
@@ -70,6 +71,9 @@ def create_app(test_config=None):
     jwt.init_app(app)
     from app.security.shared_security import register_security
     register_security(app) # S03: shared error handlers and security headers
+
+    from app.security.tls import make_cert_command
+    app.cli.add_command(make_cert_command)
 
     from app.security.auth_security import create_user_command
     app.cli.add_command(create_user_command) # R09: CLI command to create a test account
