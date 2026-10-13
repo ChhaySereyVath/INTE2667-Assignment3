@@ -94,3 +94,30 @@ input[type="email"] {
   font-size: 1rem;
   margin-bottom: 1rem;
 }
+.pill {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: #eef4fa;
+  border: 1px solid var(--line);
+  font-size: 0.875rem;
+  text-transform: capitalize;
+}
+select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  background: #fff;
+}
+input[type="date"] {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+}
+h2 { font-size: 1.2rem; margin-top: 0; }

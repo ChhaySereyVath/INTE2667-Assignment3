@@ -5,12 +5,12 @@ JSON. Every access decision lives in app/security/enrollment_security.py.
 """
 from datetime import date
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 
 from app import db
 from app.models.enrollment_models import Enrolment
 from app.security.enrollment_security import change_status, get_scoped_or_404, identity_key, record_change
-from app.security.shared_security import has_permission, permission_required, utcnow
+from app.security.shared_security import has_permission, page_login_required, permission_required, utcnow
 from app.security.validators import ADDRESS_RE, NAME_RE, POSTCODE_RE, STATES, validate
 
 enrollment_bp = Blueprint("enrollment", __name__)
@@ -171,3 +171,29 @@ def read_history(current_user, record_id):
     rows = (EnrolmentHistory.query.filter_by(enrolment_id=enrolment.id)
             .order_by(EnrolmentHistory.created_at).all())
     return jsonify({"history": [row.to_dict(include_values) for row in rows]}), 200
+
+# --- A20: the citizen's enrolment page ----------------------------------------------
+
+enrollment_pages_bp = Blueprint("enrollment_pages", __name__)
+
+
+@enrollment_pages_bp.route("/my-enrolment")
+@page_login_required
+def my_enrolment_page(current_user):
+    """R03: the page for checking, creating and updating your own enrolment.
+    The record itself is loaded by enrolment.js from /enrollment/me."""
+    if not has_permission(current_user, "enrolment:self:read"):
+        return redirect(url_for("pages.dashboard"))  # staff use the staff screens
+    return render_template("enrollment/my_enrolment.html", states=STATES)
+
+
+@enrollment_pages_bp.route("/staff/enrolments")
+@page_login_required
+def staff_queue_page(current_user):
+    """R03/R05/R11: the staff screen. Lists pending enrolments in the staff member's
+    states; delegates can approve or reject; the history shows values only to roles
+    allowed to see them. Everything is enforced again by the API behind it."""
+    if not has_permission(current_user, "enrolment:staff:read"):
+        return redirect(url_for("pages.dashboard"))
+    return render_template("enrollment/staff_queue.html",
+                           can_approve=has_permission(current_user, "enrolment:staff:approve"))
