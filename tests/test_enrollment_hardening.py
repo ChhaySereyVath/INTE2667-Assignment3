@@ -126,3 +126,27 @@ def test_the_history_table_has_no_voting_columns(app):
 
     columns = {column.name for column in EnrolmentHistory.__table__.columns}
     assert not {name for name in columns if "vote" in name or "ballot" in name}
+
+# --- A25 ---
+
+def test_purge_removes_only_history_past_the_retention_period(app):
+    from datetime import datetime
+
+    from app import db
+    from app.models.enrollment_models import Enrolment, EnrolmentHistory
+    from app.models.user import User
+    from app.security.enrollment_security import record_change
+
+    vic_record(app)  # writes one current history row
+    with app.app_context():
+        row, alice = Enrolment.query.one(), User.query.filter_by(username="alice").one()
+        old = record_change(row, alice, "address_update", "postcode", "3000", "3053")
+        old.created_at = datetime(2019, 1, 1)  # set before the insert, so no UPDATE happens
+        db.session.commit()
+    assert history_rows(app) == 2
+
+    result = app.test_cli_runner().invoke(args=["purge-history"])
+    assert "Removed 1 history rows" in result.output
+    with app.app_context():
+        remaining = EnrolmentHistory.query.one()
+        assert remaining.field == "enrolment"  # the recent row is still there

@@ -78,6 +78,9 @@ def create_app(test_config=None):
     app.cli.add_command(create_user_command)
     app.cli.add_command(outbox_command)
 
+    from app.security.enrollment_security import purge_history_command
+    app.cli.add_command(purge_history_command)
+
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
 
