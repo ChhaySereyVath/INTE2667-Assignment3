@@ -67,3 +67,19 @@ def change_status(enrolment, actor, new_status):
     record_change(enrolment, actor, f"status_{new_status}", "status", previous, new_status)
     
     return True
+
+def verify_enrolment_details(user, date_of_birth, postcode):
+    """R10: extra identity evidence for account recovery (Ken's recovery calls this).
+
+    True only when this user has an enrolment AND both details match it. The
+    comparison takes the same time whether the first character or the last one is
+    wrong, so timing does not leak how close a guess was.
+    """
+    import hmac
+
+    enrolment = Enrolment.query.filter_by(user_id=user.id).first()
+    if enrolment is None or not isinstance(date_of_birth, str) or not isinstance(postcode, str):
+        return False
+    dob_ok = hmac.compare_digest(enrolment.get_field("date_of_birth"), date_of_birth.strip())
+    postcode_ok = hmac.compare_digest(enrolment.get_field("postcode"), postcode.strip())
+    return dob_ok and postcode_ok

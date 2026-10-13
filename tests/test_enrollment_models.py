@@ -84,3 +84,25 @@ def test_record_change_stores_both_values_encrypted(app):
         assert history.actor_user_id == alice.id
         assert "3053" not in (history.old_value_enc or "")
         assert history.values() == ("3053", "3065")
+
+# --- A19: identity evidence for Ken's recovery ------------------------------------
+
+def test_verify_enrolment_details_needs_both_to_match(app):
+    from app.security.enrollment_security import verify_enrolment_details
+
+    with app.app_context():
+        alice = make_user()
+        new_enrolment(alice)  # born 1990-04-12, postcode 3053
+        assert verify_enrolment_details(alice, "1990-04-12", "3053") is True
+        assert verify_enrolment_details(alice, " 1990-04-12 ", "3053 ") is True  # spaces ignored
+        assert verify_enrolment_details(alice, "1990-04-13", "3053") is False
+        assert verify_enrolment_details(alice, "1990-04-12", "3000") is False
+        assert verify_enrolment_details(alice, None, "3053") is False
+
+
+def test_verify_enrolment_details_is_false_without_an_enrolment(app):
+    from app.security.enrollment_security import verify_enrolment_details
+
+    with app.app_context():
+        nobody = make_user(username="nobody")
+        assert verify_enrolment_details(nobody, "1990-04-12", "3053") is False
