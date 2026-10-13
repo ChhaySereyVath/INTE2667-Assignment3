@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request
 from app import db
 from app.models.enrollment_models import Enrolment
 from app.security.enrollment_security import change_status, get_scoped_or_404, identity_key, record_change
-from app.security.shared_security import permission_required, utcnow
+from app.security.shared_security import has_permission, permission_required, utcnow
 from app.security.validators import ADDRESS_RE, NAME_RE, POSTCODE_RE, STATES, validate
 
 enrollment_bp = Blueprint("enrollment", __name__)
@@ -158,3 +158,16 @@ def decide_enrolment(current_user, record_id):
         return jsonify({"error": "Access denied"}), 403
     db.session.commit()
     return jsonify({"enrolment": enrolment.summary()}), 200
+
+@enrollment_bp.route("/<record_id>/history", methods=["GET"])
+@permission_required("enrolment:staff:read")
+def read_history(current_user, record_id):
+    """R05: the change history. Old and new values are shown only to roles that
+    are allowed to see them."""
+    from app.models.enrollment_models import EnrolmentHistory
+
+    enrolment = get_scoped_or_404(record_id, current_user, "read")
+    include_values = has_permission(current_user, "enrolment:history:read_sensitive")
+    rows = (EnrolmentHistory.query.filter_by(enrolment_id=enrolment.id)
+            .order_by(EnrolmentHistory.created_at).all())
+    return jsonify({"history": [row.to_dict(include_values) for row in rows]}), 200

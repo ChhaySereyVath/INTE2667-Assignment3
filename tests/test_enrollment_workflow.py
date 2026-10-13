@@ -110,3 +110,37 @@ def test_an_approved_record_cannot_be_moved_again(app):
                          headers=csrf_headers(dana)).status_code == 403
     assert dana.post(f"/enrollment/{record_id}/decision", json={"decision": "deleted"},
                      headers=csrf_headers(dana)).status_code == 400
+
+# --- A16: the change history ----------------------------------------------------
+
+def test_the_history_hides_values_from_roles_that_may_not_see_them(app):
+    alice = citizen_client(app)
+    alice.post("/enrollment/me", json=ENROLMENT, headers=csrf_headers(alice))
+    alice.patch("/enrollment/me/address", headers=csrf_headers(alice),
+                json={"address_line": "99 New Road", "suburb": "Fitzroy",
+                      "postcode": "3065", "state": "VIC"})
+    with app.app_context():
+        record_id = Enrolment.query.one().id
+
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    rows = emma.get(f"/enrollment/{record_id}/history").get_json()["history"]
+    assert rows and all("old_value" not in row for row in rows)
+    assert all({"actor_user_id", "action", "field", "created_at"} <= set(row) for row in rows)
+
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    rows = dana.get(f"/enrollment/{record_id}/history").get_json()["history"]
+    postcode = next(row for row in rows if row["field"] == "postcode")
+    assert (postcode["old_value"], postcode["new_value"]) == ("3053", "3065")
+
+
+def test_history_values_are_encrypted_in_the_database(app):
+    alice = citizen_client(app)
+    alice.post("/enrollment/me", json=ENROLMENT, headers=csrf_headers(alice))
+    alice.patch("/enrollment/me/address", headers=csrf_headers(alice),
+                json={"address_line": "99 New Road", "suburb": "Fitzroy",
+                      "postcode": "3065", "state": "VIC"})
+    with app.app_context():
+        row = EnrolmentHistory.query.filter_by(field="address_line").one()
+        assert "Example Street" not in (row.old_value_enc or "")
+        assert "New Road" not in (row.new_value_enc or "")
+        assert row.values() == ("12 Example Street", "99 New Road")
