@@ -11,7 +11,12 @@
     <dt>Account status</dt>
     <dd id="status">Loading...</dd>
   </dl>
-  <p class="muted">Enrolment details appear here once the enrolment pages are built.</p>
+  {% if can_admin %}
+  <p><a class="button" href="{{ url_for('pages.admin_page') }}">Administration</a></p>
+  {% endif %}
+  {% if can_enrol %}
+  <p><a class="button" href="{{ url_for('enrollment_pages.my_enrolment_page') }}">My enrolment</a></p>
+  {% endif %}
   <button type="button" class="button secondary" id="logout-button">Log out</button>
 </section>
 {% endblock %}

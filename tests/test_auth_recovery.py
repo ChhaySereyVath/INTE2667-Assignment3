@@ -290,3 +290,35 @@ def test_flask_outbox_prints_working_recovery_links(app, client):
     ask(client)
     output = app.test_cli_runner().invoke(args=["outbox"]).output
     assert re.search(r"/recover/confirm#token=[A-Za-z0-9_-]+", output)
+
+# --- K52 ---
+
+def test_only_an_administrator_with_mfa_reaches_the_admin_page(app, client):
+    assert client.get("/admin").headers["Location"].endswith("/login")
+
+    make_account(app)
+    login(client, "alice", "Correct-Horse-42")
+    assert client.get("/admin").headers["Location"].endswith("/dashboard")
+    client.post("/auth/logout", headers=csrf_headers(client))
+
+    make_account(app, username="admin1", role="administrator")
+    login(client, "admin1", "Correct-Horse-42")
+    assert client.get("/admin").headers["Location"].endswith("/mfa")  # R08 first
+    verify_mfa(app)
+    response = client.get("/admin")
+    assert response.status_code == 200
+    assert 'id="staff-form"' in response.get_data(as_text=True)
+    assert 'href="/admin"' in client.get("/dashboard").get_data(as_text=True)
+
+
+def test_the_dashboard_links_each_role_to_its_own_page(app):
+    """Citizens see Austin's enrolment page; administrators see administration."""
+    make_account(app)
+    citizen = app.test_client()
+    login(citizen, "alice", "Correct-Horse-42")
+    body = citizen.get("/dashboard").get_data(as_text=True)
+    assert 'href="/my-enrolment"' in body and 'href="/admin"' not in body
+
+    admin = admin_client(app)
+    body = admin.get("/dashboard").get_data(as_text=True)
+    assert 'href="/admin"' in body and 'href="/my-enrolment"' not in body
