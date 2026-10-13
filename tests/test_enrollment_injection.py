@@ -46,3 +46,61 @@ def test_injection_in_the_login_form_does_not_execute(app, client):
         assert response.status_code in (400, 401, 429)
     with app.app_context():
         assert User.query.count() == 1  # the users table is untouched
+
+def test_a_failed_validation_writes_nothing_at_all(app):
+    """R04: 'Failed validation does not partially modify system data.'"""
+    client = citizen_client(app)
+    enrol(client)
+    with app.app_context():
+        before = Enrolment.query.one().get_field("address_line")
+        history_before = EnrolmentHistory.query.count()
+
+    # a valid address line with an invalid postcode in the same request
+    response = client.patch("/enrollment/me/address", headers=csrf_headers(client),
+                            json={"address_line": "99 New Road", "suburb": "Fitzroy",
+                                  "postcode": "ABCDE", "state": "VIC"})
+    assert response.status_code == 400
+    with app.app_context():
+        assert Enrolment.query.one().get_field("address_line") == before
+        assert EnrolmentHistory.query.count() == history_before
+
+
+def test_error_messages_never_echo_the_payload_back(app):
+    client = citizen_client(app)
+    for payload in PAYLOADS:
+        body = client.patch("/enrollment/me/address", headers=csrf_headers(client),
+                            json={"address_line": payload, "suburb": "Fitzroy",
+                                  "postcode": "3053", "state": "VIC"}).get_data(as_text=True)
+        assert payload not in body
+
+
+def test_unknown_fields_cannot_set_the_status_or_the_owner(app):
+    client = citizen_client(app)
+    for extra in ({"status": "approved"}, {"user_id": "someone-else"},
+                  {"registered_by": "someone-else"}, {"approved_by": "someone-else"}):
+        assert enrol(client, **extra).status_code == 400
+    with app.app_context():
+        assert Enrolment.query.count() == 0
+
+
+def test_an_oversized_request_is_refused(app):
+    """R06: 'Oversized requests are rejected.'"""
+    client = citizen_client(app)
+    response = client.post("/enrollment/me", headers=csrf_headers(client),
+                           json=dict(ENROLMENT, address_line="x" * 100_000))
+    assert response.status_code == 413
+    assert response.get_json() == {"error": "Request too large"}
+
+
+def test_values_come_back_as_data_never_as_markup(app):
+    """R04: 'User-controlled output is safely encoded.'
+
+    The API answers in JSON, which escapes nothing into HTML, and the pages insert
+    text with textContent. An address with punctuation is stored and returned as it
+    was typed, not as markup.
+    """
+    client = citizen_client(app)
+    enrol(client, address_line="12 O'Connell St #3")
+    body = client.get("/enrollment/me")
+    assert body.headers["Content-Type"].startswith("application/json")
+    assert body.get_json()["enrolment"]["address_line"] == "12 O'Connell St #3"
