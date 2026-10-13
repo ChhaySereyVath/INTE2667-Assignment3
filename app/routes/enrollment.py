@@ -29,6 +29,12 @@ ENROL_SCHEMA = {
     "state": {"type": str, "required": True, "enum": STATES},
 }
 
+ADDRESS_SCHEMA = {
+    "address_line": {"type": str, "required": True, "pattern": ADDRESS_RE},
+    "suburb": {"type": str, "required": True, "pattern": NAME_RE},
+    "postcode": {"type": str, "required": True, "pattern": POSTCODE_RE},
+    "state": {"type": str, "required": True, "enum": STATES},
+}
 
 def _write_enrolment(enrolment, cleaned):
     """Encrypt each field onto the row. The row must already have its id."""
@@ -82,3 +88,28 @@ def self_enrol(current_user):
     if problem is not None:
         return jsonify({"error": "Already enrolled"}), 409
     return jsonify({"enrolment": enrolment.to_dict()}), 201
+
+@enrollment_bp.route("/me/address", methods=["PATCH"])
+@permission_required("enrolment:self:update_address")
+def update_own_address(current_user):
+    """R03/R05: a citizen updates their own address; every field change is recorded."""
+    ok, cleaned, errors = validate(request.get_json(silent=True), ADDRESS_SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request", "fields": errors}), 400
+
+    enrolment = Enrolment.query.filter_by(user_id=current_user.id).first()
+    if enrolment is None:
+        return jsonify({"error": "Not found"}), 404
+
+    for field in ("address_line", "suburb", "postcode"):
+        old = enrolment.get_field(field)
+        if old != cleaned[field]:
+            record_change(enrolment, current_user, "address_update", field, old, cleaned[field])
+            enrolment.set_field(field, cleaned[field])
+    if enrolment.state != cleaned["state"]:
+        record_change(enrolment, current_user, "address_update", "state",
+                      enrolment.state, cleaned["state"])
+        enrolment.state = cleaned["state"]
+    enrolment.updated_at = utcnow()
+    db.session.commit()
+    return jsonify({"enrolment": enrolment.to_dict()}), 200

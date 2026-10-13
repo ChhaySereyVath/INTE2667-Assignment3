@@ -79,3 +79,20 @@ def test_one_person_cannot_enrol_twice(app):
     assert enrol(other).status_code == 409
     with app.app_context():
         assert Enrolment.query.count() == 1
+
+# --- A12: address update --------------------------------------------------------
+
+def test_a_citizen_updates_their_own_address_and_the_change_is_recorded(app):
+    client = citizen_client(app)
+    enrol(client)
+    response = client.patch("/enrollment/me/address", headers=csrf_headers(client),
+                            json={"address_line": "99 New Road", "suburb": "Fitzroy",
+                                  "postcode": "3065", "state": "VIC"})
+    assert response.status_code == 200
+    assert response.get_json()["enrolment"]["address_line"] == "99 New Road"
+    with app.app_context():
+        rows = EnrolmentHistory.query.filter_by(action="address_update").all()
+        changed = {row.field for row in rows}
+        assert changed == {"address_line", "suburb", "postcode"}  # state did not change
+        old, new = next(r for r in rows if r.field == "postcode").values()
+        assert (old, new) == ("3053", "3065")
