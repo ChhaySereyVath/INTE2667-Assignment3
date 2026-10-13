@@ -20,6 +20,9 @@ ALLOWED_TRANSITIONS = {
 }
 
 ENCRYPTED_FIELDS = ("given_name", "family_name", "date_of_birth", "address_line", "suburb", "postcode")
+# R05: the only things a history row may describe. Nothing about voting is listed,
+# so the history can never reveal a ballot choice.
+HISTORY_FIELDS = ("enrolment", "status", "state") + ENCRYPTED_FIELDS
 
 
 class Enrolment(db.Model):

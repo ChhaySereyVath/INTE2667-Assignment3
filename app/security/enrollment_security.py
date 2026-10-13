@@ -8,7 +8,7 @@ from flask import abort, current_app
 from flask.cli import with_appcontext
 
 from app import db
-from app.models.enrollment_models import ALLOWED_TRANSITIONS, Enrolment, EnrolmentHistory
+from app.models.enrollment_models import ALLOWED_TRANSITIONS, Enrolment, EnrolmentHistory, HISTORY_FIELDS
 from app.security.crypto import blind_index, encrypt_field, normalise_identity, record_aad
 from app.security.shared_security import has_permission, utcnow
 
@@ -71,6 +71,10 @@ def record_change(enrolment, actor, action, field, old_value, new_value):
     The id is chosen first so the values can be encrypted against it, and the row is
     then written in ONE insert: the database refuses any later update (A23).
     """
+    if field not in HISTORY_FIELDS:
+        # R05: history holds enrolment fields only, so it can never carry a ballot choice
+        raise ValueError("not an enrolment field")
+    
     row_id = str(uuid.uuid4())
     row = EnrolmentHistory(
         id=row_id,

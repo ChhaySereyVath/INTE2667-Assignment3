@@ -103,3 +103,26 @@ def test_there_is_no_endpoint_that_changes_history(app):
     for method in ("put", "patch", "delete", "post"):
         response = getattr(dana, method)(f"/enrollment/{record_id}/history", headers=csrf_headers(dana))
         assert response.status_code == 405
+
+# --- A24 ---
+
+def test_history_can_only_describe_enrolment_fields(app):
+    import pytest
+
+    from app.models.enrollment_models import Enrolment
+    from app.models.user import User
+    from app.security.enrollment_security import record_change
+
+    vic_record(app)
+    with app.app_context():
+        row, alice = Enrolment.query.one(), User.query.filter_by(username="alice").one()
+        for field in ("ballot_choice", "vote", "preferences", "password"):
+            with pytest.raises(ValueError):
+                record_change(row, alice, "address_update", field, "a", "b")
+
+
+def test_the_history_table_has_no_voting_columns(app):
+    from app.models.enrollment_models import EnrolmentHistory
+
+    columns = {column.name for column in EnrolmentHistory.__table__.columns}
+    assert not {name for name in columns if "vote" in name or "ballot" in name}
