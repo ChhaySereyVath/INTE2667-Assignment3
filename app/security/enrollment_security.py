@@ -1,5 +1,9 @@
 """Enrolment rules: who may touch which record, and the change history (R03, R05, R11)."""
-from flask import abort
+from datetime import date
+
+import click
+from flask import abort, current_app
+from flask.cli import with_appcontext
 
 from app import db
 from app.models.enrollment_models import ALLOWED_TRANSITIONS, Enrolment, EnrolmentHistory
@@ -83,3 +87,43 @@ def verify_enrolment_details(user, date_of_birth, postcode):
     dob_ok = hmac.compare_digest(enrolment.get_field("date_of_birth"), date_of_birth.strip())
     postcode_ok = hmac.compare_digest(enrolment.get_field("postcode"), postcode.strip())
     return dob_ok and postcode_ok
+
+
+def voting_details_for(user, on_date):
+    """R16 hand-over for Yufei's eligibility check: only what the voting side needs.
+
+    Returns whether the person has an APPROVED enrolment, its state, and whether they
+    are 18 or over on `on_date`. Their name, address and birth date never leave this
+    module (data minimisation), so the voting code has no personal data to leak.
+    """
+    from app.models.enrollment_models import Enrolment
+
+    enrolment = Enrolment.query.filter_by(user_id=user.id, status="approved").first()
+    if enrolment is None:
+        return {"enrolled": False, "state": None, "old_enough": False}
+    born = date.fromisoformat(enrolment.get_field("date_of_birth"))
+    age = on_date.year - born.year - ((on_date.month, on_date.day) < (born.month, born.day))
+    return {"enrolled": True, "state": enrolment.state, "old_enough": age >= 18}
+
+
+def purge_old_history():
+    """R05: remove history rows older than the retention period. Returns how many.
+
+    The database trigger (protect_history) allows exactly these rows and no others,
+    so even a wrong cutoff here could not delete recent history.
+    """
+    from datetime import timedelta
+
+    cutoff = utcnow() - timedelta(days=current_app.config["HISTORY_RETENTION_DAYS"])
+    count = EnrolmentHistory.query.filter(EnrolmentHistory.created_at < cutoff).delete()
+    db.session.commit()
+    return count
+
+
+@click.command("purge-history")
+@with_appcontext
+def purge_history_command():
+    """Delete enrolment history older than the retention period: flask purge-history"""
+    count = purge_old_history()
+    click.echo(f"Removed {count} history rows older than "
+               f"{current_app.config['HISTORY_RETENTION_DAYS']} days.")
