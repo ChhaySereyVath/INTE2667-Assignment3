@@ -411,3 +411,32 @@ def test_no_personal_detail_is_stored_logged_or_shown_in_plain_text(app, tmp_pat
 
     # and the owner, who IS allowed to see it, still can
     assert client.get("/enrollment/me").get_json()["enrolment"]["family_name"] == "Wexcombe"
+
+# --- A32 ---
+
+def test_impossible_or_too_young_birth_dates_cannot_enrol(app):
+    from datetime import date
+
+    from app.models.enrollment_models import Enrolment
+    from app.security.shared_security import utcnow
+
+    client = citizen_client(app)
+    today = utcnow().date()
+    fifteen = date(today.year - 15, today.month, min(today.day, 28)).isoformat()
+    for dob, rule in (("2999-01-01", "cannot be in the future"),
+                      (fifteen, "must make you at least 16 to enrol")):
+        response = enrol(client, date_of_birth=dob)
+        assert response.status_code == 400
+        assert response.get_json()["fields"] == {"date_of_birth": rule}
+    with app.app_context():
+        assert Enrolment.query.count() == 0  # nothing written (R04)
+    sixteen = date(today.year - 16, today.month, min(today.day, 28)).isoformat()
+    assert enrol(client, date_of_birth=sixteen).status_code == 201  # 16 may enrol
+
+
+def test_staff_cannot_register_a_child_either(app):
+    from tests.test_enrollment_workflow import citizen_without_a_login, staff_register
+
+    user_id = citizen_without_a_login(app)
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    assert staff_register(emma, user_id, date_of_birth="2020-01-01").status_code == 400

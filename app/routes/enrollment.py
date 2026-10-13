@@ -19,6 +19,22 @@ enrollment_bp = Blueprint("enrollment", __name__)
 # here is the input check, not the eligibility decision.
 EARLIEST_DOB = date(1900, 1, 1)
 
+# R03/R04: the AEC lets people enrol at 16 or 17 so they can vote when they turn 18
+# (aec.gov.au/enrol). A birth date that makes someone younger, or is in the future,
+# is an invalid value, not a typo to store.
+MIN_ENROLMENT_AGE = 16
+
+
+def _age_problem(date_of_birth):
+    """Return why a birth date cannot enrol, or None if it can."""
+    today = utcnow().date()
+    if date_of_birth > today:
+        return "cannot be in the future"
+    age = today.year - date_of_birth.year - ((today.month, today.day) < (date_of_birth.month, date_of_birth.day))
+    if age < MIN_ENROLMENT_AGE:
+        return f"must make you at least {MIN_ENROLMENT_AGE} to enrol"
+    return None
+
 ENROL_SCHEMA = {
     "given_name": {"type": str, "required": True, "pattern": NAME_RE},
     "family_name": {"type": str, "required": True, "pattern": NAME_RE},
@@ -87,6 +103,10 @@ def self_enrol(current_user):
     if not ok:
         # R04: a failed validation must not write anything at all
         return jsonify({"error": "Invalid request", "fields": errors}), 400
+    
+    problem = _age_problem(cleaned["date_of_birth"])
+    if problem is not None:
+        return jsonify({"error": "Invalid request", "fields": {"date_of_birth": problem}}), 400
 
     enrolment, problem = _create_enrolment(current_user.id, cleaned, current_user)
     if problem is not None:
@@ -155,6 +175,9 @@ def staff_register(current_user):
     ok, cleaned, errors = validate(request.get_json(silent=True), STAFF_REGISTER_SCHEMA)
     if not ok:
         return jsonify({"error": "Invalid request", "fields": errors}), 400
+    problem = _age_problem(cleaned["date_of_birth"])
+    if problem is not None:
+        return jsonify({"error": "Invalid request", "fields": {"date_of_birth": problem}}), 400
     from app.models.auth_models import user_states
 
     if cleaned["state"] not in user_states(current_user):
