@@ -113,3 +113,25 @@ class MfaChallenge(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     expires_at = db.Column(db.DateTime, nullable=False)
     used_at = db.Column(db.DateTime)
+
+
+class RecoveryRequest(db.Model):
+    """R10: one attempt to recover an account, and where it has got to.
+
+    awaiting_owner     the owner has been emailed and must prove they hold the address
+    awaiting_approval  staff only: a separate administrator must approve it
+    approved           a single-use reset link has been sent to the owner
+    completed          the password was reset (and staff keys removed)
+    rejected           an administrator refused it
+    """
+
+    __tablename__ = "recovery_requests"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False, default="awaiting_owner")
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    owner_confirmed_at = db.Column(db.DateTime)
+    decided_by = db.Column(db.String(36), db.ForeignKey("users.id"))
+    decided_at = db.Column(db.DateTime)
+    completed_at = db.Column(db.DateTime)

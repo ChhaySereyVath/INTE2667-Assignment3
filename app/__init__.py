@@ -52,6 +52,7 @@ def create_app(test_config=None):
         WEBAUTHN_RP_NAME="AEC Voting Platform",
         WEBAUTHN_ORIGIN="http://localhost:5000",
         MFA_CHALLENGE_SECONDS=120,
+        RECOVERY_TOKEN_HOURS=0.5,  # R10: recovery links expire after 30 minutes
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
@@ -74,6 +75,9 @@ def create_app(test_config=None):
     from app.security.auth_security import create_user_command, outbox_command
     app.cli.add_command(create_user_command)
     app.cli.add_command(outbox_command)
+
+    from app.routes.recovery import recovery_bp
+    app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
 
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
