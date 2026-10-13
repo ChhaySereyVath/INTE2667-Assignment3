@@ -253,3 +253,4 @@ def mfa_authenticate_finish(current_user):
     if not isinstance(credential, dict) or not finish_authentication(current_user, g.current_session, credential):
         return jsonify({"error": MFA_FAILED}), 400
     return _mfa_passed_response("Security key accepted")
+

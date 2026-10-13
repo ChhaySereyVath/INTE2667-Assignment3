@@ -126,3 +126,73 @@ def test_a_failed_key_check_leaves_the_session_unprivileged(app, client):
     assert pass_mfa(client, impostor).status_code == 400
     assert session_row(app).mfa_verified is False
     assert post(client, "/auth/admin/staff", NEW_STAFF).status_code == 403
+
+# --- K45 ---
+
+def staff_with_key_signed_in_by_password(app, client, key=None):
+    sign_in_staff(app, client)
+    key = key or SoftAuthenticator()
+    add_key(client, key)
+    client.post("/auth/logout", headers=csrf_headers(client))
+    login(client, "emma", "Correct-Horse-42")
+    return key
+
+
+def test_a_replayed_answer_is_refused(app, client):
+    # a passkey-style key whose counter stays at 0, so ONLY the single-use
+    # challenge can stop the replay (the counter check cannot)
+    key = staff_with_key_signed_in_by_password(app, client, SoftAuthenticator(counts=False))
+    options = post(client, "/auth/mfa/authenticate/begin").get_json()["options"]
+    answer = key.authenticate(options)
+    assert post(client, "/auth/mfa/authenticate/finish", answer).status_code == 200
+    # the same signed answer sent again: the challenge was used up the first time
+    assert post(client, "/auth/mfa/authenticate/finish", answer).status_code == 400
+
+
+def test_an_expired_challenge_is_refused(app, client, frozen_clock):
+    key = staff_with_key_signed_in_by_password(app, client)
+    options = post(client, "/auth/mfa/authenticate/begin").get_json()["options"]
+    frozen_clock.advance(timedelta(seconds=121))
+    response = post(client, "/auth/mfa/authenticate/finish", key.authenticate(options))
+    assert response.status_code == 400
+    assert session_row(app).mfa_verified is False
+
+
+def test_an_answer_for_another_website_is_refused(app, client):
+    """Phishing: a look-alike site gets a signature for ITS address, not ours."""
+    key = staff_with_key_signed_in_by_password(app, client)
+    response = pass_mfa(client, key, origin="https://aec-login.example.com")
+    assert response.status_code == 400
+
+
+def test_a_cloned_key_is_detected_by_its_counter(app, client):
+    key = staff_with_key_signed_in_by_password(app, client)
+    assert pass_mfa(client, key).status_code == 200
+    client.post("/auth/logout", headers=csrf_headers(client))
+    login(client, "emma", "Correct-Horse-42")
+    # a copy of the key repeats a counter value the server has already seen
+    assert pass_mfa(client, key, bump_counter=False).status_code == 400
+
+
+def test_a_challenge_from_another_session_cannot_be_used(app, client):
+    key = staff_with_key_signed_in_by_password(app, client)
+    options = post(client, "/auth/mfa/authenticate/begin").get_json()["options"]
+    other = app.test_client()
+    login(other, "emma", "Correct-Horse-42")
+    # the other session never asked for this challenge
+    assert post(other, "/auth/mfa/authenticate/finish", key.authenticate(options)).status_code == 400
+
+
+def test_garbage_is_refused_without_an_error_page(app, client):
+    staff_with_key_signed_in_by_password(app, client)
+    post(client, "/auth/mfa/authenticate/begin")
+    for body in ({}, {"id": "x"}, {"id": "x", "response": "nope"}):
+        response = post(client, "/auth/mfa/authenticate/finish", body)
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "Security key check failed. Try again."}
+
+
+def test_keys_can_only_be_removed_through_recovery(client):
+    """R08: 'MFA recovery uses the separate R10 recovery process.'"""
+    for path in ("/auth/mfa/credentials", "/auth/mfa/remove", "/auth/mfa/reset"):
+        assert client.post(path).status_code == 404
