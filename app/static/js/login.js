@@ -16,7 +16,8 @@ document.getElementById("login-form").addEventListener("submit", async function 
     if (result.ok) {
       // The session cookie was set by the server. Nothing is stored in
       // localStorage, so an XSS bug cannot steal the session (R21).
-      window.location.assign("/dashboard");
+      // R08: staff go to the security-key step; nothing else opens until it passes
+      window.location.assign(result.data.mfa_required ? "/mfa" : "/dashboard");
       return;
     }
     // R09: show the server's generic message only. The page must never say

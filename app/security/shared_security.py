@@ -164,6 +164,9 @@ def page_login_required(view):
         db.session.commit()
         g.no_store = True   # read by add_security_headers below
         g.page_user = user  # read by the nav bar in base.html
+        # R08: a staff member who has not passed MFA sees the MFA page and nothing else
+        if not _mfa_satisfied(user) and request.endpoint != "pages.mfa_page":
+            return redirect(url_for("pages.mfa_page"))
         return view(*args, current_user=user, **kwargs)
 
     return wrapper

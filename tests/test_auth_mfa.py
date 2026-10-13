@@ -196,3 +196,40 @@ def test_keys_can_only_be_removed_through_recovery(client):
     """R08: 'MFA recovery uses the separate R10 recovery process.'"""
     for path in ("/auth/mfa/credentials", "/auth/mfa/remove", "/auth/mfa/reset"):
         assert client.post(path).status_code == 404
+
+
+
+# --- K46 ---
+
+def test_staff_without_mfa_are_sent_to_the_mfa_page(app, client):
+    sign_in_staff(app, client)
+    response = client.get("/dashboard")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/mfa")
+
+
+def test_the_mfa_page_offers_to_add_a_key_then_to_use_it(app, client):
+    from tests.test_auth_pages import INLINE_SCRIPT
+
+    sign_in_staff(app, client)
+    body = client.get("/mfa").get_data(as_text=True)
+    assert 'id="enrol-button"' in body and INLINE_SCRIPT.search(body) is None
+    key = SoftAuthenticator()
+    add_key(client, key)
+    client.post("/auth/logout", headers=csrf_headers(client))
+    login(client, "emma", "Correct-Horse-42")
+    assert 'id="verify-button"' in client.get("/mfa").get_data(as_text=True)
+
+
+def test_after_mfa_the_staff_dashboard_opens(app, client):
+    sign_in_staff(app, client)
+    add_key(client, SoftAuthenticator())
+    assert client.get("/dashboard").status_code == 200
+
+
+def test_citizens_are_never_sent_to_the_mfa_page(app, client):
+    with app.app_context():
+        make_user()
+    login(client, "alice", "Correct-Horse-42")
+    assert client.get("/dashboard").status_code == 200
+    assert client.get("/mfa").headers["Location"].endswith("/dashboard")

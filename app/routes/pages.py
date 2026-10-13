@@ -1,7 +1,8 @@
 """Page routes: they only render templates. All data comes from the /auth and
 /enrollment APIs, so the GUI is just another client of our REST services."""
-from flask import Blueprint, current_app, g, render_template
+from flask import Blueprint, current_app, g, redirect, render_template, url_for
 
+from app.security.mfa_security import has_security_key
 from app.security.shared_security import page_login_required
 
 pages_bp = Blueprint("pages", __name__)
@@ -16,6 +17,14 @@ def index():
 def login_page():
     """Login form. The form posts to /auth/login with fetch()."""
     return render_template("auth/login.html")
+
+@pages_bp.route("/mfa")
+@page_login_required
+def mfa_page(current_user):
+    """R08: staff add or use their security key here before anything else opens."""
+    if not current_user.is_privileged:
+        return redirect(url_for("pages.dashboard"))  # citizens are never asked
+    return render_template("auth/mfa.html", enrolled=has_security_key(current_user))
 
 @pages_bp.route("/timeout")
 def timeout_page():

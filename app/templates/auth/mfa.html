@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Security key - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card" id="mfa" data-enrolled="{{ 'yes' if enrolled else 'no' }}">
+  {% if enrolled %}
+    <h1>Use your security key</h1>
+    <p>Staff accounts need a security key as well as a password. Insert or tap your key, or
+       use the passkey on this device, when your browser asks.</p>
+    <button type="button" class="button" id="verify-button">Use security key</button>
+  {% else %}
+    <h1>Add your security key</h1>
+    <p>Staff accounts need a security key as well as a password. This is a one-time step: after
+       it, you will use the key each time you sign in.</p>
+    <button type="button" class="button" id="enrol-button">Add security key</button>
+  {% endif %}
+  <p class="muted">Lost your key? Ask an administrator to start account recovery. Keys cannot be
+     removed any other way.</p>
+  <button type="button" class="button secondary" id="logout-button">Log out</button>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/webauthn.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}
