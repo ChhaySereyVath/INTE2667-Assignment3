@@ -68,3 +68,13 @@ function showFieldErrors(fields) {
   });
   list.hidden = list.children.length === 0;
 }
+
+// Links in the simulated emails look like /some/page#token=...
+// The part after "#" never reaches the server in the page request, so the token
+// stays out of server logs and Referer headers. This reads it, then removes it from
+// the address bar and the history straight away (R09, R10).
+function takeFragmentToken() {
+  const match = window.location.hash.match(/^#token=([A-Za-z0-9_-]{20,100})$/);
+  history.replaceState(null, "", window.location.pathname);
+  return match ? match[1] : null;
+}

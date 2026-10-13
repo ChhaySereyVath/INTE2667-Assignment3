@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Choose a new password - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Choose a new password</h1>
+  <div id="notice" class="notice" hidden></div>
+  <ul id="field-errors" class="field-errors" hidden></ul>
+  <form id="recover-reset-form">
+    <label for="new_password">New password</label>
+    <input type="password" id="new_password" minlength="12" maxlength="128" required
+           autocomplete="new-password">
+    <p class="hint">At least 12 characters. This signs you out everywhere. Staff will add a new
+       security key at their next sign-in.</p>
+    <button type="submit" class="button" id="recover-reset-button">Reset password</button>
+  </form>
+  <p><a class="button" id="login-link" href="{{ url_for('pages.login_page') }}" hidden>Log in</a></p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/recover.js') }}"></script>
+{% endblock %}
