@@ -320,3 +320,32 @@ def test_restore_never_overwrites_an_existing_file(app, tmp_path):
     with app.app_context(), pytest.raises(FileExistsError):
         restore_backup(path, existing)
     assert existing.read_bytes() == b"precious"
+
+# --- A30 ---
+
+def test_backups_older_than_90_days_are_pruned(app, tmp_path):
+    from datetime import timedelta
+
+    from app.security.backup import prune_backups
+    from app.security.shared_security import utcnow
+
+    with app.app_context():
+        now = utcnow()
+        old = tmp_path / f"evp-{now - timedelta(days=91):%Y%m%d-%H%M%S}-000000.db.enc"
+        recent = tmp_path / f"evp-{now - timedelta(days=89):%Y%m%d-%H%M%S}-000000.db.enc"
+        old.write_bytes(b"x")
+        recent.write_bytes(b"x")
+        assert prune_backups(tmp_path, 90) == [old.name]
+    assert recent.exists() and not old.exists()
+
+
+def test_the_backup_and_verify_commands_write_a_restore_report(app, tmp_path):
+    vic_record(app)
+    app.config["BACKUP_DIR"] = str(tmp_path / "backups")
+    app.config["RESTORE_REPORT_DIR"] = str(tmp_path / "reports")
+    runner = app.test_cli_runner()
+    assert "Wrote" in runner.invoke(args=["backup"]).output
+    result = runner.invoke(args=["verify-backup"])
+    assert "Restore test passed" in result.output
+    report = next((tmp_path / "reports").glob("restore-*.md")).read_text()
+    assert "**PASS**" in report and "| users | 1 |" in report and "| enrolments | 1 |" in report
