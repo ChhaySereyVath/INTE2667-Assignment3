@@ -1,8 +1,9 @@
 """Account recovery endpoints: /auth/recovery/... (R10)."""
 from flask import Blueprint, jsonify, request
 
-from app.security.recovery_security import confirm_owner, start_recovery
+from app.security.recovery_security import confirm_owner, start_recovery, decide, pending_requests
 from app.security.validators import EMAIL_RE, POSTCODE_RE, validate
+from app.security.shared_security import permission_required
 
 recovery_bp = Blueprint("recovery", __name__)
 
@@ -20,6 +21,8 @@ CONFIRM_SCHEMA = {
     "date_of_birth": {"type": str, "max": 10},
     "postcode": {"type": str, "pattern": POSTCODE_RE},
 }
+
+DECISION_SCHEMA = {"decision": {"type": str, "required": True, "enum": ("approved", "rejected")}}
 
 @recovery_bp.route("/request", methods=["POST"])
 def request_recovery():
@@ -46,3 +49,24 @@ def confirm_recovery():
                         "status": outcome}), 202
     return jsonify({"message": "Thanks. We have emailed you a link to choose a new password.",
                     "status": outcome}), 200
+
+@recovery_bp.route("/pending", methods=["GET"])
+@permission_required("admin:recovery:approve")
+def list_pending(current_user):
+    """Step 3 queue: staff recoveries waiting for an administrator."""
+    return jsonify({"requests": pending_requests()}), 200
+
+
+@recovery_bp.route("/<request_id>/decision", methods=["POST"])
+@permission_required("admin:recovery:approve")
+def decide_recovery(current_user, request_id):
+    """Step 3: a SEPARATE administrator approves or rejects a staff recovery (R10)."""
+    ok, data, _ = validate(request.get_json(silent=True), DECISION_SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request"}), 400
+    outcome = decide(request_id, current_user, data["decision"])
+    if outcome == "self":
+        return jsonify({"error": "Access denied"}), 403
+    if outcome == "not_found":
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"message": f"Recovery {data['decision']}"}), 200

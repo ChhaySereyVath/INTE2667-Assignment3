@@ -135,3 +135,67 @@ def test_the_recovery_link_expires(app, client, frozen_clock):
     token = latest_token(app, "recovery")
     frozen_clock.advance(timedelta(minutes=31))
     assert confirm(client, token).status_code == 400
+
+# --- K49 ---
+
+def test_a_staff_recovery_waits_for_an_administrator(app, client):
+    make_account(app, username="emma", role="aec_employee")
+    ask(client, username="emma")
+    response = confirm(client, latest_token(app, "recovery", "emma"))
+    assert response.status_code == 202
+    assert response.get_json()["status"] == "awaiting_approval"
+    assert latest_token(app, "recovery_reset", "emma") is None  # nothing until approved
+
+
+def test_a_second_administrator_approves_and_the_owner_gets_the_link(app, client):
+    make_account(app, username="emma", role="aec_employee")
+    ask(client, username="emma")
+    confirm(client, latest_token(app, "recovery", "emma"))
+
+    admin = admin_client(app)
+    queue = admin.get("/auth/recovery/pending").get_json()["requests"]
+    assert [row["username"] for row in queue] == ["emma"]
+    assert set(queue[0]) == {"id", "username", "role", "requested_at"}  # nothing personal
+    response = admin.post(f"/auth/recovery/{queue[0]['id']}/decision",
+                          json={"decision": "approved"}, headers=csrf_headers(admin))
+    assert response.status_code == 200
+    assert latest_token(app, "recovery_reset", "emma") is not None
+
+
+def test_an_administrator_cannot_approve_their_own_recovery(app, client):
+    """R10: 'Self-approval is rejected.'"""
+    admin = admin_client(app, username="admin1")
+    ask(client, username="admin1")
+    confirm(client, latest_token(app, "recovery", "admin1"))
+    request_id = pending_id(app, "admin1")
+    response = admin.post(f"/auth/recovery/{request_id}/decision",
+                          json={"decision": "approved"}, headers=csrf_headers(admin))
+    assert response.status_code == 403
+    assert latest_token(app, "recovery_reset", "admin1") is None
+
+
+def test_only_administrators_can_approve(app, client):
+    make_account(app, username="emma", role="aec_employee")
+    ask(client, username="emma")
+    confirm(client, latest_token(app, "recovery", "emma"))
+    request_id = pending_id(app, "emma")
+
+    make_account(app, username="dana", role="commissioner_delegate")
+    dana = app.test_client()
+    login(dana, "dana", "Correct-Horse-42")
+    verify_mfa(app)
+    assert dana.post(f"/auth/recovery/{request_id}/decision", json={"decision": "approved"},
+                     headers=csrf_headers(dana)).status_code == 403
+    assert dana.get("/auth/recovery/pending").status_code == 403
+
+
+def test_a_rejected_recovery_sends_no_reset_link(app, client):
+    make_account(app, username="emma", role="aec_employee")
+    ask(client, username="emma")
+    confirm(client, latest_token(app, "recovery", "emma"))
+    admin = admin_client(app)
+    admin.post(f"/auth/recovery/{pending_id(app, 'emma')}/decision",
+               json={"decision": "rejected"}, headers=csrf_headers(admin))
+    assert latest_token(app, "recovery_reset", "emma") is None
+    with app.app_context():
+        assert Notification.query.filter_by(template="recovery_rejected").count() == 1

@@ -45,7 +45,14 @@ def confirm_owner(token, date_of_birth=None, postcode=None):
     if request_row is None:
         return None
 
-    # Austin's enrolment code: only needed once the token and request are valid
+    if user.is_privileged:
+        # staff have no voter enrolment to check. R10: a SEPARATE administrator approves
+        request_row.owner_confirmed_at = utcnow()
+        request_row.status = "awaiting_approval"
+        db.session.commit()
+        return "awaiting_approval"
+
+    # citizens: Austin's enrolment code, only needed on this path
     from app.models.enrollment_models import Enrolment
     from app.security.enrollment_security import verify_enrolment_details
 
@@ -57,12 +64,6 @@ def confirm_owner(token, date_of_birth=None, postcode=None):
         return None
 
     request_row.owner_confirmed_at = utcnow()
-    if user.is_privileged:
-        # R10: staff resets need a separate supervisor's approval
-        request_row.status = "awaiting_approval"
-        db.session.commit()
-        return "awaiting_approval"
-
     _approve(request_row, user)
     return "approved"
 
@@ -75,3 +76,35 @@ def _approve(request_row, user, decided_by=None):
     db.session.commit()
     token = issue_token(user, "recovery_reset", current_app.config["RECOVERY_TOKEN_HOURS"])
     queue_notification(user, "recovery_reset", token=token)
+
+
+
+def decide(request_id, approver, decision):
+    """Step 3, staff only: a separate administrator approves or rejects.
+    Returns 'ok', 'self' (refused: own request), or 'not_found'."""
+    request_row = db.session.get(RecoveryRequest, str(request_id))
+    if request_row is None or request_row.status != "awaiting_approval":
+        return "not_found"
+    if request_row.user_id == approver.id:
+        return "self"  # R10: 'Self-approval is rejected.'
+    owner = db.session.get(User, request_row.user_id)
+    if decision == "approved":
+        _approve(request_row, owner, decided_by=approver)
+    else:
+        request_row.status = "rejected"
+        request_row.decided_by, request_row.decided_at = approver.id, utcnow()
+        db.session.commit()
+        queue_notification(owner, "recovery_rejected")
+    return "ok"
+
+
+def pending_requests():
+    """What the administrator's queue shows: who and when, nothing personal."""
+    rows = (RecoveryRequest.query.filter_by(status="awaiting_approval")
+            .order_by(RecoveryRequest.created_at).all())
+    result = []
+    for row in rows:
+        owner = db.session.get(User, row.user_id)
+        result.append({"id": row.id, "username": owner.username, "role": owner.role,
+                       "requested_at": row.created_at.isoformat()})
+    return result
