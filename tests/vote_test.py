@@ -21,7 +21,8 @@ from app import db
 from app.models.voting_models import Candidate, VoteAuditLog, VoteRecord, VotingToken
 from app.models.user import User
 from app.security.shared_security import utcnow
-from tests.conftest import TEST_ORIGIN, csrf_headers
+from tests.conftest import csrf_headers
+TEST_ORIGIN = "https://localhost"
 from tests.test_auth_login import login, make_user
 
 
