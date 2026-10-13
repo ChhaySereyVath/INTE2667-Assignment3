@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, url_fo
 
 from app import db
 from app.models.enrollment_models import Enrolment
-from app.security.enrollment_security import change_status, get_scoped_or_404, identity_key, record_change
+from app.security.enrollment_security import change_status, get_scoped_or_404, identity_key, log_refused, record_change
 from app.security.shared_security import has_permission, page_login_required, permission_required, utcnow
 from app.security.validators import ADDRESS_RE, NAME_RE, POSTCODE_RE, STATES, validate
 
@@ -136,6 +136,7 @@ def staff_register(current_user):
 
     if cleaned["state"] not in user_states(current_user):
         # R12: least privilege. A Victorian employee cannot register someone in NSW.
+        log_refused(current_user, "register", "state", None)
         return jsonify({"error": "Access denied"}), 403
 
     enrolment, problem = _create_enrolment(str(cleaned["user_id"]), cleaned, current_user,

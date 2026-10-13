@@ -1,4 +1,6 @@
 """Enrolment rules: who may touch which record, and the change history (R03, R05, R11)."""
+import logging
+import uuid
 from datetime import date
 
 import click
@@ -32,6 +34,25 @@ def can_access(user, action, enrolment):
         return False
     return enrolment.state in user_states(user)
 
+# R11/R13: refused access goes to its own logger, in one key=value format, with ids
+# only. Keane's audit log can read this logger later; nothing personal is ever in it.
+security_log = logging.getLogger("evp.security")
+
+
+def _safe_id(value):
+    """Log an id only if it is a real UUID. The id comes from the request, so a
+    crafted one could otherwise smuggle a fake second log line in (log injection)."""
+    try:
+        return str(uuid.UUID(str(value)))
+    except ValueError:
+        return "invalid-id"
+
+
+def log_refused(user, action, target_type, target_id):
+    """R11: 'Unauthorised access attempts are rejected and logged.'"""
+    security_log.warning("access_denied actor=%s action=%s target=%s:%s result=denied",
+                         user.id, action, target_type, _safe_id(target_id))
+
 def get_scoped_or_404(record_id, user, action):
     """Fetch a record only if this user may use it for this action (R11).
 
@@ -40,6 +61,7 @@ def get_scoped_or_404(record_id, user, action):
     """
     enrolment = db.session.get(Enrolment, str(record_id))
     if not can_access(user, action, enrolment):
+        log_refused(user, action, "enrolment", record_id)
         abort(404)
     return enrolment
 
