@@ -7,6 +7,7 @@ from flask_jwt_extended import JWTManager
 from flask_sqlalchemy import SQLAlchemy
 
 
+
 db = SQLAlchemy()
 jwt = JWTManager()
 
@@ -24,6 +25,8 @@ def create_app(test_config=None):
         SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///evp.db"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         MAX_CONTENT_LENGTH=64 * 1024,  # R06: reject request bodies over 64 KB
+        # R05: one full federal term (3 years) plus a year's margin
+        HISTORY_RETENTION_DAYS=4 * 365,
         # R21: the JWT lives only in an HttpOnly cookie that JavaScript can't read (S15),
         # is sent only over HTTPS (browsers treat http://localhost as secure), is never
         # sent by other websites (SameSite=Strict) and needs a CSRF token (S16)
@@ -50,9 +53,14 @@ def create_app(test_config=None):
         # address the browser shows. A key's answer for any other origin is refused.
         WEBAUTHN_RP_ID="localhost",
         WEBAUTHN_RP_NAME="AEC Voting Platform",
-        WEBAUTHN_ORIGIN="http://localhost:5000",
+        WEBAUTHN_ORIGIN=os.environ.get("WEBAUTHN_ORIGIN", "http://localhost:5000"),
         MFA_CHALLENGE_SECONDS=120,
-        RECOVERY_TOKEN_HOURS=0.5,  # R10: recovery links expire after 30 minutes
+        RECOVERY_TOKEN_HOURS=0.5,  # R10: recovery links expire after 30 minutes,
+        # R07: where backups and restore reports go, and how long backups are kept
+        BACKUP_DIR="backups",
+        BACKUP_RETENTION_DAYS=90,
+        RESTORE_REPORT_DIR="docs/restore-reports",
+        BACKUP_KEY=os.environ.get("BACKUP_KEY")
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
@@ -69,12 +77,23 @@ def create_app(test_config=None):
     from app.security.shared_security import register_security
     register_security(app) # S03: shared error handlers and security headers
 
+    from app.security.tls import make_cert_command
+    app.cli.add_command(make_cert_command)
+
     from app.security.auth_security import create_user_command
     app.cli.add_command(create_user_command) # R09: CLI command to create a test account
 
     from app.security.auth_security import create_user_command, outbox_command
     app.cli.add_command(create_user_command)
     app.cli.add_command(outbox_command)
+
+    from app.security.backup import backup_command, restore_command, verify_backup_command
+    app.cli.add_command(backup_command)
+    app.cli.add_command(verify_backup_command)
+    app.cli.add_command(restore_command)
+
+    from app.security.enrollment_security import purge_history_command
+    app.cli.add_command(purge_history_command)
 
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
@@ -83,11 +102,18 @@ def create_app(test_config=None):
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
 
+    from app.routes.enrollment import enrollment_bp, enrollment_pages_bp
+    app.register_blueprint(enrollment_bp, url_prefix="/enrollment")
+    app.register_blueprint(enrollment_pages_bp)
+
     from app.routes.pages import pages_bp
     app.register_blueprint(pages_bp)
 
     with app.app_context():
         from app import models
         db.create_all()
+        
+        from app.models.enrollment_models import protect_history
+        protect_history(db.engine, app.config["HISTORY_RETENTION_DAYS"])
 
     return app

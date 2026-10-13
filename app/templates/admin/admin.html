@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Administration - AEC Voting Platform{% endblock %}
+{% block content %}
+<div id="notice" class="notice" hidden></div>
+<ul id="field-errors" class="field-errors" hidden></ul>
+
+<section class="card">
+  <h1>Recovery requests</h1>
+  <p class="muted">Staff accounts waiting for an administrator. You cannot approve your own.</p>
+  <p id="queue-empty" class="muted" hidden>Nothing is waiting.</p>
+  <div class="table-wrap">
+    <table id="queue" hidden>
+      <thead><tr><th>Username</th><th>Role</th><th>Requested</th><th>Decision</th></tr></thead>
+      <tbody id="queue-rows"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Create a staff account</h2>
+  <form id="staff-form">
+    <label for="staff_username">Username</label>
+    <input type="text" id="staff_username" minlength="3" maxlength="40" required>
+    <label for="staff_email">Work email</label>
+    <input type="email" id="staff_email" maxlength="254" required>
+    <label for="staff_role">Role</label>
+    <select id="staff_role" required>
+      <option value="aec_employee">AEC employee</option>
+      <option value="commissioner_delegate">Commissioner delegate</option>
+      <option value="auditor">Auditor</option>
+      <option value="administrator">Administrator</option>
+    </select>
+    <fieldset class="states">
+      <legend>States they may work in</legend>
+      {% for state in states %}
+        <label class="check"><input type="checkbox" name="states" value="{{ state }}"> {{ state }}</label>
+      {% endfor %}
+    </fieldset>
+    <label for="staff_password">Temporary password</label>
+    <input type="password" id="staff_password" minlength="12" maxlength="128" required
+           autocomplete="new-password">
+    <p class="hint">They activate the account from the emailed link and add a security key at
+       their first sign-in.</p>
+    <button type="submit" class="button" id="staff-button">Create account</button>
+  </form>
+</section>
+<button type="button" class="button secondary" id="logout-button">Log out</button>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}

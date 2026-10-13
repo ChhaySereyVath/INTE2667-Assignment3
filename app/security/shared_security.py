@@ -251,6 +251,9 @@ def register_security(app):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
+        if request.is_secure:
+            # R01: tell the browser to use only HTTPS for this site from now on
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         # R21: account data must not sit in the browser cache or the back button
         # after logout, which matters most on a shared polling-place computer
         if request.path.startswith("/auth/") or g.get("no_store"):

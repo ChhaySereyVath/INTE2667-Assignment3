@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}My enrolment - AEC Voting Platform{% endblock %}
+{% block content %}
+<div id="notice" class="notice" hidden></div>
+<ul id="field-errors" class="field-errors" hidden></ul>
+
+<section class="card" id="enrolment-view" hidden>
+  <h1>My enrolment</h1>
+  <p>Status: <span id="enrolment-status" class="pill"></span></p>
+  <dl class="details">
+    <dt>Name</dt><dd><span id="view-given_name"></span> <span id="view-family_name"></span></dd>
+    <dt>Date of birth</dt><dd id="view-date_of_birth"></dd>
+    <dt>Address</dt>
+    <dd><span id="view-address_line"></span>, <span id="view-suburb"></span>
+        <span id="view-state"></span> <span id="view-postcode"></span></dd>
+  </dl>
+</section>
+
+<section class="card" id="address-section" hidden>
+  <h2>Change my address</h2>
+  <form id="address-form">
+    <label for="address_line">Street address</label>
+    <input type="text" id="address_line" maxlength="120" required autocomplete="address-line1">
+    <label for="suburb">Suburb</label>
+    <input type="text" id="suburb" maxlength="100" required autocomplete="address-level2">
+    <label for="postcode">Postcode</label>
+    <input type="text" id="postcode" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required
+           autocomplete="postal-code">
+    <label for="state">State or territory</label>
+    <select id="state" required>
+      {% for state in states %}<option value="{{ state }}">{{ state }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="button" id="address-button">Save new address</button>
+  </form>
+</section>
+
+<section class="card" id="enrol-section" hidden>
+  <h1>Enrol to vote</h1>
+  <p>You are not enrolled yet. Fill in your details as they appear on your ID.</p>
+  <form id="enrol-form">
+    <label for="given_name">Given name</label>
+    <input type="text" id="given_name" maxlength="100" required autocomplete="given-name">
+    <label for="family_name">Family name</label>
+    <input type="text" id="family_name" maxlength="100" required autocomplete="family-name">
+    <label for="date_of_birth">Date of birth</label>
+    <input type="date" id="date_of_birth" required autocomplete="bday">
+    <label for="enrol_address_line">Street address</label>
+    <input type="text" id="enrol_address_line" maxlength="120" required autocomplete="address-line1">
+    <label for="enrol_suburb">Suburb</label>
+    <input type="text" id="enrol_suburb" maxlength="100" required autocomplete="address-level2">
+    <label for="enrol_postcode">Postcode</label>
+    <input type="text" id="enrol_postcode" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+           required autocomplete="postal-code">
+    <label for="enrol_state">State or territory</label>
+    <select id="enrol_state" required>
+      {% for state in states %}<option value="{{ state }}">{{ state }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="button" id="enrol-button">Enrol</button>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/enrolment.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}

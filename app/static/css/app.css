@@ -94,3 +94,39 @@ input[type="email"] {
   font-size: 1rem;
   margin-bottom: 1rem;
 }
+.pill {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: #eef4fa;
+  border: 1px solid var(--line);
+  font-size: 0.875rem;
+  text-transform: capitalize;
+}
+select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  background: #fff;
+}
+input[type="date"] {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+}
+h2 { font-size: 1.2rem; margin-top: 0; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+td .button { padding: 0.35rem 0.75rem; margin-right: 0.4rem; font-size: 0.9rem; }
+fieldset.states { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 1rem; padding: 0.6rem 0.8rem; }
+fieldset.states legend { font-weight: 600; padding: 0 0.3rem; }
+label.check { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 400; margin-right: 0.9rem; }

@@ -3,7 +3,7 @@
 from flask import Blueprint, current_app, g, redirect, render_template, url_for
 
 from app.security.mfa_security import has_security_key
-from app.security.shared_security import page_login_required
+from app.security.shared_security import has_permission ,page_login_required
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -25,6 +25,16 @@ def mfa_page(current_user):
     if not current_user.is_privileged:
         return redirect(url_for("pages.dashboard"))  # citizens are never asked
     return render_template("auth/mfa.html", enrolled=has_security_key(current_user))
+
+@pages_bp.route("/admin")
+@page_login_required
+def admin_page(current_user):
+    """R10/R12: recovery approvals and staff accounts. Administrators only."""
+    if not has_permission(current_user, "admin:recovery:approve"):
+        return redirect(url_for("pages.dashboard"))
+    from app.security.validators import STATES
+
+    return render_template("admin/admin.html", states=STATES)
 
 @pages_bp.route("/timeout")
 def timeout_page():
@@ -73,4 +83,7 @@ def activate_page():
 def dashboard(current_user):
     """Signed-in landing page. The session is checked here on the server, so the
     page cannot be opened by typing the URL (R21, R11)."""
-    return render_template("auth/dashboard.html")
+    return render_template("auth/dashboard.html",
+                        can_enrol=has_permission(current_user, "enrolment:self:read"),
+                        can_staff=has_permission(current_user, "enrolment:staff:read"),
+                        can_admin=has_permission(current_user, "admin:recovery:approve"))

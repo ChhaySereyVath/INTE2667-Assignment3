@@ -52,7 +52,6 @@ def confirm_owner(token, date_of_birth=None, postcode=None):
         db.session.commit()
         return "awaiting_approval"
 
-    # citizens: Austin's enrolment code, only needed on this path
     from app.models.enrollment_models import Enrolment
     from app.security.enrollment_security import verify_enrolment_details
 

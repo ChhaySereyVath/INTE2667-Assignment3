@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Enrolment queue - AEC Voting Platform{% endblock %}
+{% block content %}
+<div id="notice" class="notice" hidden></div>
+
+<section class="card" id="queue-card" data-can-approve="{{ 'yes' if can_approve else 'no' }}">
+  <h1>Pending enrolments</h1>
+  <p class="muted">Only enrolments in the states you are assigned to are shown.</p>
+  <p id="queue-empty" class="muted" hidden>Nothing is waiting.</p>
+  <div class="table-wrap">
+    <table id="queue" hidden>
+      <thead><tr><th>Received</th><th>State</th><th>Status</th><th></th></tr></thead>
+      <tbody id="queue-rows"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" id="record-card" hidden>
+  <h2>Enrolment</h2>
+  <dl class="details">
+    <dt>Name</dt><dd><span id="rec-given_name"></span> <span id="rec-family_name"></span></dd>
+    <dt>Date of birth</dt><dd id="rec-date_of_birth"></dd>
+    <dt>Address</dt>
+    <dd><span id="rec-address_line"></span>, <span id="rec-suburb"></span>
+        <span id="rec-state"></span> <span id="rec-postcode"></span></dd>
+    <dt>Status</dt><dd><span id="rec-status" class="pill"></span></dd>
+  </dl>
+  {% if can_approve %}
+  <p id="own-registration" class="muted" hidden>You registered this person, so another delegate
+     must decide it.</p>
+  <p id="decision-buttons">
+    <button type="button" class="button" id="approve-button">Approve</button>
+    <button type="button" class="button secondary" id="reject-button">Reject</button>
+  </p>
+  {% endif %}
+  <h2>Change history</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>Action</th><th>Field</th><th>Old</th><th>New</th></tr></thead>
+      <tbody id="history-rows"></tbody>
+    </table>
+  </div>
+  <p class="muted" id="history-note" hidden>Old and new values are only shown to commissioner
+     delegates.</p>
+</section>
+<button type="button" class="button secondary" id="logout-button">Log out</button>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/staff.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}

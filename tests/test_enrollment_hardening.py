@@ -1,0 +1,487 @@
+"""R11/R05/R01: logging of refused access, protected history, and data at rest."""
+import logging
+
+from tests.conftest import csrf_headers
+from tests.test_auth_login import make_user
+from tests.test_enrollment_access import ENROLMENT, citizen_client, enrol, staff_client
+
+
+def vic_record(app):
+    from app.models.enrollment_models import Enrolment
+
+    alice = citizen_client(app)
+    enrol(alice)
+    with app.app_context():
+        return Enrolment.query.one().id
+
+
+# --- A22 ---
+
+def test_a_refused_record_access_is_logged_without_personal_details(app, caplog):
+    record_id = vic_record(app)
+    nsw = staff_client(app, "noah.nsw", "aec_employee", ["NSW"])
+    caplog.set_level(logging.WARNING, logger="evp.security")
+    assert nsw.get(f"/enrollment/{record_id}").status_code == 404
+
+    lines = [r.getMessage() for r in caplog.records if r.name == "evp.security"]
+    assert len(lines) == 1
+    assert "access_denied" in lines[0] and f"target=enrolment:{record_id}" in lines[0]
+    assert "action=read" in lines[0] and "result=denied" in lines[0]
+    for detail in ("Testperson", "Example Street", "1990-04-12", "3053"):
+        assert detail not in lines[0]  # R02: ids only
+
+
+def test_an_allowed_access_writes_no_denial(app, caplog):
+    record_id = vic_record(app)
+    vic = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    caplog.set_level(logging.WARNING, logger="evp.security")
+    assert vic.get(f"/enrollment/{record_id}").status_code == 200
+    assert not [r for r in caplog.records if r.name == "evp.security"]
+
+
+def test_a_crafted_record_id_cannot_forge_a_log_line(app, caplog):
+    """Log injection: a newline in the id must not start a fake second entry."""
+    nsw = staff_client(app, "noah.nsw", "aec_employee", ["NSW"])
+    caplog.set_level(logging.WARNING, logger="evp.security")
+    nsw.get("/enrollment/x%0Aaccess_granted%20actor=admin")
+    line = [r.getMessage() for r in caplog.records if r.name == "evp.security"][0]
+    assert "\n" not in line
+    assert "target=enrolment:invalid-id" in line
+
+
+def test_registering_outside_your_states_is_logged(app, caplog):
+    with app.app_context():
+        user_id = make_user(username="citizen1").id
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    caplog.set_level(logging.WARNING, logger="evp.security")
+    emma.post("/enrollment/staff/register", json=dict(ENROLMENT, state="NSW", user_id=user_id),
+              headers=csrf_headers(emma))
+    assert any("action=register" in r.getMessage() for r in caplog.records if r.name == "evp.security")
+
+# --- A23 ---
+
+def history_rows(app):
+    from app.models.enrollment_models import EnrolmentHistory
+
+    with app.app_context():
+        return EnrolmentHistory.query.count()
+
+
+def raw_sql(app, statement):
+    """Run SQL straight at the database, the way a stray script or the sqlite3 tool would."""
+    from sqlalchemy import text
+
+    from app import db
+
+    with app.app_context():
+        try:
+            db.session.execute(text(statement))
+            db.session.commit()
+            return "allowed"
+        except Exception as error:  # noqa: BLE001
+            db.session.rollback()
+            return str(error.orig) if hasattr(error, "orig") else str(error)
+
+
+def test_the_database_refuses_to_edit_history(app):
+    vic_record(app)
+    assert history_rows(app) == 1
+    result = raw_sql(app, "UPDATE enrolment_history SET actor_user_id = 'someone-else'")
+    assert "append-only" in result
+
+
+def test_the_database_refuses_to_delete_recent_history(app):
+    vic_record(app)
+    result = raw_sql(app, "DELETE FROM enrolment_history")
+    assert "retention period" in result
+    assert history_rows(app) == 1
+
+
+def test_there_is_no_endpoint_that_changes_history(app):
+    record_id = vic_record(app)
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    for method in ("put", "patch", "delete", "post"):
+        response = getattr(dana, method)(f"/enrollment/{record_id}/history", headers=csrf_headers(dana))
+        assert response.status_code == 405
+
+# --- A24 ---
+
+def test_history_can_only_describe_enrolment_fields(app):
+    import pytest
+
+    from app.models.enrollment_models import Enrolment
+    from app.models.user import User
+    from app.security.enrollment_security import record_change
+
+    vic_record(app)
+    with app.app_context():
+        row, alice = Enrolment.query.one(), User.query.filter_by(username="alice").one()
+        for field in ("ballot_choice", "vote", "preferences", "password"):
+            with pytest.raises(ValueError):
+                record_change(row, alice, "address_update", field, "a", "b")
+
+
+def test_the_history_table_has_no_voting_columns(app):
+    from app.models.enrollment_models import EnrolmentHistory
+
+    columns = {column.name for column in EnrolmentHistory.__table__.columns}
+    assert not {name for name in columns if "vote" in name or "ballot" in name}
+
+# --- A25 ---
+
+def test_purge_removes_only_history_past_the_retention_period(app):
+    from datetime import datetime
+
+    from app import db
+    from app.models.enrollment_models import Enrolment, EnrolmentHistory
+    from app.models.user import User
+    from app.security.enrollment_security import record_change
+
+    vic_record(app)  # writes one current history row
+    with app.app_context():
+        row, alice = Enrolment.query.one(), User.query.filter_by(username="alice").one()
+        old = record_change(row, alice, "address_update", "postcode", "3000", "3053")
+        old.created_at = datetime(2019, 1, 1)  # set before the insert, so no UPDATE happens
+        db.session.commit()
+    assert history_rows(app) == 2
+
+    result = app.test_cli_runner().invoke(args=["purge-history"])
+    assert "Removed 1 history rows" in result.output
+    with app.app_context():
+        remaining = EnrolmentHistory.query.one()
+        assert remaining.field == "enrolment"  # the recent row is still there
+
+# --- A26 ---
+
+def test_the_queue_lists_only_pending_records_in_your_states(app):
+    from tests.test_enrollment_workflow import citizen_without_a_login, staff_register
+
+    vic_id = citizen_without_a_login(app, "citizen1")
+    nsw_id = citizen_without_a_login(app, "citizen2")
+    vic_staff = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    nsw_staff = staff_client(app, "noah.nsw", "aec_employee", ["NSW"])
+    staff_register(vic_staff, vic_id)
+    staff_register(nsw_staff, nsw_id, given_name="Sam", family_name="Other", state="NSW")
+
+    queue = vic_staff.get("/enrollment/pending").get_json()["enrolments"]
+    assert [item["state"] for item in queue] == ["VIC"]
+    # ids, states and dates only: nobody's details are in the list (R02)
+    assert set(queue[0]) == {"id", "state", "status", "received_at", "registered_by_you"}
+    assert queue[0]["registered_by_you"] is True
+
+
+def test_decided_records_leave_the_queue(app):
+    from tests.test_enrollment_workflow import citizen_without_a_login, staff_register
+
+    user_id = citizen_without_a_login(app)
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    staff_register(emma, user_id)
+    record_id = emma.get("/enrollment/pending").get_json()["enrolments"][0]["id"]
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    assert dana.get("/enrollment/pending").get_json()["enrolments"][0]["registered_by_you"] is False
+    dana.post(f"/enrollment/{record_id}/decision", json={"decision": "approved"},
+              headers=csrf_headers(dana))
+    assert dana.get("/enrollment/pending").get_json()["enrolments"] == []
+
+
+def test_citizens_cannot_see_the_queue(app):
+    alice = citizen_client(app)
+    assert alice.get("/enrollment/pending").status_code == 403
+
+# --- A27 ---
+
+def test_staff_get_the_queue_page_and_citizens_do_not(app):
+    from tests.test_auth_pages import INLINE_SCRIPT
+
+    alice = citizen_client(app)
+    assert alice.get("/staff/enrolments").headers["Location"].endswith("/dashboard")
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    response = emma.get("/staff/enrolments")
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
+    assert INLINE_SCRIPT.search(body) is None
+    assert 'id="approve-button"' not in body  # employees register; only delegates decide
+    assert 'href="/staff/enrolments"' in emma.get("/dashboard").get_data(as_text=True)
+
+
+def test_delegates_get_the_decision_buttons(app):
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    assert 'id="approve-button"' in dana.get("/staff/enrolments").get_data(as_text=True)
+
+# --- A28 ---
+
+def test_https_responses_carry_hsts_and_plain_http_does_not(client):
+    secure = client.get("/", base_url="https://localhost")
+    assert secure.headers["Strict-Transport-Security"] == "max-age=31536000; includeSubDomains"
+    # HSTS is only meaningful over HTTPS; browsers ignore it on plain HTTP
+    assert "Strict-Transport-Security" not in client.get("/", base_url="http://localhost").headers
+
+
+def test_make_cert_writes_a_localhost_certificate_and_a_private_key(app, tmp_path):
+    import os
+    import stat
+
+    from cryptography import x509
+
+    from app.security.tls import make_dev_certificate
+
+    with app.app_context():
+        cert_path, key_path = make_dev_certificate(tmp_path)
+    certificate = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    names = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert "localhost" in names.get_values_for_type(x509.DNSName)
+    assert b"PRIVATE KEY" in key_path.read_bytes()
+    if os.name == "posix":  # Windows has no owner-only mode bits to check
+        assert stat.S_IMODE(os.stat(key_path).st_mode) == 0o600
+
+
+def test_session_cookies_are_never_sent_over_plain_http(app, client):
+    """R01: the login cookie is marked Secure, so the browser keeps it off HTTP."""
+    from tests.test_auth_login import login, make_user
+
+    with app.app_context():
+        make_user()
+    cookies = login(client, "alice", "Correct-Horse-42").headers.getlist("Set-Cookie")
+    assert all("Secure" in cookie for cookie in cookies)
+
+# --- A29 ---
+
+def backup_of_some_data(app, tmp_path):
+    from app.security.backup import create_backup
+
+    vic_record(app)  # a citizen called alice with an encrypted enrolment
+    with app.app_context():
+        return create_backup(tmp_path)
+
+
+def test_a_backup_file_contains_nothing_readable(app, tmp_path):
+    data = backup_of_some_data(app, tmp_path).read_bytes()
+    assert b"SQLite format 3" not in data  # not even recognisable as a database
+    assert b"alice" not in data  # usernames are plain in the live database, not here
+
+
+def test_a_backup_restores_to_the_same_data(app, tmp_path):
+    import sqlite3
+
+    from app.security.backup import restore_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    with app.app_context():
+        target = restore_backup(path, tmp_path / "restored.db")
+    connection = sqlite3.connect(target)
+    assert connection.execute("SELECT username FROM users").fetchall() == [("alice",)]
+    assert connection.execute("SELECT COUNT(*) FROM enrolments").fetchone()[0] == 1
+    connection.close()
+
+
+def test_a_damaged_or_renamed_backup_is_refused(app, tmp_path):
+    import pytest
+
+    from app.security.backup import read_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    renamed = path.with_name("evp-20200101-000000-000000.db.enc")
+    path.rename(renamed)
+    with app.app_context(), pytest.raises(ValueError):
+        read_backup(renamed)  # the name is part of what was encrypted
+
+    damaged = bytearray(renamed.read_bytes())
+    damaged[-1] ^= 0x01
+    renamed.write_bytes(bytes(damaged))
+    with app.app_context(), pytest.raises(ValueError):
+        read_backup(renamed)
+
+
+def test_backups_use_their_own_key_and_fail_closed_without_it(app, tmp_path):
+    import secrets
+
+    import pytest
+
+    from app.security.backup import create_backup, read_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    with app.app_context():
+        app.config["BACKUP_KEY"] = secrets.token_hex(32)  # someone else's key
+        with pytest.raises(ValueError):
+            read_backup(path)
+        app.config["BACKUP_KEY"] = None
+        with pytest.raises(RuntimeError):
+            create_backup(tmp_path)  # no key, no backup: never an unencrypted one
+
+
+def test_restore_never_overwrites_an_existing_file(app, tmp_path):
+    import pytest
+
+    from app.security.backup import restore_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    existing = tmp_path / "live.db"
+    existing.write_bytes(b"precious")
+    with app.app_context(), pytest.raises(FileExistsError):
+        restore_backup(path, existing)
+    assert existing.read_bytes() == b"precious"
+
+# --- A30 ---
+
+def test_backups_older_than_90_days_are_pruned(app, tmp_path):
+    from datetime import timedelta
+
+    from app.security.backup import prune_backups
+    from app.security.shared_security import utcnow
+
+    with app.app_context():
+        now = utcnow()
+        old = tmp_path / f"evp-{now - timedelta(days=91):%Y%m%d-%H%M%S}-000000.db.enc"
+        recent = tmp_path / f"evp-{now - timedelta(days=89):%Y%m%d-%H%M%S}-000000.db.enc"
+        old.write_bytes(b"x")
+        recent.write_bytes(b"x")
+        assert prune_backups(tmp_path, 90) == [old.name]
+    assert recent.exists() and not old.exists()
+
+
+def test_the_backup_and_verify_commands_write_a_restore_report(app, tmp_path):
+    vic_record(app)
+    app.config["BACKUP_DIR"] = str(tmp_path / "backups")
+    app.config["RESTORE_REPORT_DIR"] = str(tmp_path / "reports")
+    runner = app.test_cli_runner()
+    assert "Wrote" in runner.invoke(args=["backup"]).output
+    result = runner.invoke(args=["verify-backup"])
+    assert "Restore test passed" in result.output
+    report = next((tmp_path / "reports").glob("restore-*.md")).read_text()
+    assert "**PASS**" in report and "| users | 1 |" in report and "| enrolments | 1 |" in report
+
+# --- A31 ---
+
+# Distinctive values, so a match can only mean real plaintext leaked, never chance
+SECRETS_OF_A_CITIZEN = {
+    "given_name": "Quillon",
+    "family_name": "Wexcombe",
+    "date_of_birth": "1987-11-23",
+    "address_line": "77 Marrowbank Crescent",
+    "suburb": "Brunswick",
+    "email": "q.wexcombe@example.com",
+}
+
+
+def test_no_personal_detail_is_stored_logged_or_shown_in_plain_text(app, tmp_path, caplog):
+    """R01: 'Tests confirm that plaintext sensitive data is not exposed.'
+
+    One citizen registers, activates, enrols and moves house. Then every place the
+    data could leak is searched: the database file, every log line, what staff see,
+    and a backup.
+    """
+    import json
+    import logging
+
+    from app import db
+    from app.models.auth_models import Notification
+    from app.security.backup import create_backup
+    from tests.test_auth_login import login
+
+    caplog.set_level(logging.DEBUG)
+    client = app.test_client()
+    client.post("/auth/register", json={"username": "qwex", "email": SECRETS_OF_A_CITIZEN["email"],
+                                        "password": "Correct-Horse-42"})
+    with app.app_context():
+        token = json.loads(Notification.query.filter_by(template="activation").one().payload)["token"]
+    client.post("/auth/activate", json={"token": token})
+    login(client, "qwex", "Correct-Horse-42")
+    enrol(client, given_name=SECRETS_OF_A_CITIZEN["given_name"],
+          family_name=SECRETS_OF_A_CITIZEN["family_name"],
+          date_of_birth=SECRETS_OF_A_CITIZEN["date_of_birth"])
+    client.patch("/enrollment/me/address", headers=csrf_headers(client),
+                 json={"address_line": SECRETS_OF_A_CITIZEN["address_line"],
+                       "suburb": SECRETS_OF_A_CITIZEN["suburb"], "postcode": "3056", "state": "VIC"})
+    staff = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    staff_view = staff.get("/enrollment/pending").get_data(as_text=True)
+    assert '"state":"VIC"' in staff_view.replace(" ", "")  # she really does see the record
+
+    with app.app_context():
+        raw = db.engine.raw_connection()
+        database_bytes = bytes(raw.driver_connection.serialize())
+        raw.close()
+        backup_bytes = create_backup(tmp_path).read_bytes()
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+
+    for name, value in SECRETS_OF_A_CITIZEN.items():
+        assert value.encode() not in database_bytes, f"{name} is readable in the database"
+        assert value.encode() not in backup_bytes, f"{name} is readable in a backup"
+        assert value not in log_text, f"{name} appears in a log line"
+        assert value not in staff_view, f"{name} appears in the staff queue"
+
+    # and the owner, who IS allowed to see it, still can
+    assert client.get("/enrollment/me").get_json()["enrolment"]["family_name"] == "Wexcombe"
+
+# --- A32 ---
+
+def test_impossible_or_too_young_birth_dates_cannot_enrol(app):
+    from datetime import date
+
+    from app.models.enrollment_models import Enrolment
+    from app.security.shared_security import utcnow
+
+    client = citizen_client(app)
+    today = utcnow().date()
+    fifteen = date(today.year - 15, today.month, min(today.day, 28)).isoformat()
+    for dob, rule in (("2999-01-01", "cannot be in the future"),
+                      (fifteen, "must make you at least 16 to enrol")):
+        response = enrol(client, date_of_birth=dob)
+        assert response.status_code == 400
+        assert response.get_json()["fields"] == {"date_of_birth": rule}
+    with app.app_context():
+        assert Enrolment.query.count() == 0  # nothing written (R04)
+    sixteen = date(today.year - 16, today.month, min(today.day, 28)).isoformat()
+    assert enrol(client, date_of_birth=sixteen).status_code == 201  # 16 may enrol
+
+
+def test_staff_cannot_register_a_child_either(app):
+    from tests.test_enrollment_workflow import citizen_without_a_login, staff_register
+
+    user_id = citizen_without_a_login(app)
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    assert staff_register(emma, user_id, date_of_birth="2020-01-01").status_code == 400
+
+# --- A33 ---
+
+def test_voting_details_share_only_what_the_voting_side_needs(app):
+    from datetime import date
+
+    from app.models.enrollment_models import Enrolment
+    from app.models.user import User
+    from app.security.enrollment_security import voting_details_for
+
+    record_id = vic_record(app)  # born 1990-04-12, still pending
+    with app.app_context():
+        alice = User.query.filter_by(username="alice").one()
+        # pending is not enrolled: only an approved enrolment counts
+        assert voting_details_for(alice, date(2026, 5, 2)) == {
+            "enrolled": False, "state": None, "old_enough": False}
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    dana.post(f"/enrollment/{record_id}/decision", json={"decision": "approved"},
+              headers=csrf_headers(dana))
+    with app.app_context():
+        alice = User.query.filter_by(username="alice").one()
+        details = voting_details_for(alice, date(2026, 5, 2))
+        assert details == {"enrolled": True, "state": "VIC", "old_enough": True}
+        # no name, address or birth date crosses to the voting side
+        assert set(details) == {"enrolled", "state", "old_enough"}
+
+
+def test_a_seventeen_year_old_is_enrolled_but_not_old_enough_yet(app):
+    from datetime import date
+
+    from app.models.user import User
+    from app.security.enrollment_security import voting_details_for
+
+    alice = citizen_client(app)
+    enrol(alice, date_of_birth="2008-11-01")  # 17 on the day below, 18 a month later
+    with app.app_context():
+        from app.models.enrollment_models import Enrolment
+        record_id = Enrolment.query.one().id
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    dana.post(f"/enrollment/{record_id}/decision", json={"decision": "approved"},
+              headers=csrf_headers(dana))
+    with app.app_context():
+        user = User.query.filter_by(username="alice").one()
+        assert voting_details_for(user, date(2026, 10, 1))["old_enough"] is False
+        assert voting_details_for(user, date(2026, 11, 1))["old_enough"] is True

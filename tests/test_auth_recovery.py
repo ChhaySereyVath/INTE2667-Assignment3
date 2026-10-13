@@ -12,6 +12,8 @@ from tests.conftest import csrf_headers, verify_mfa
 from tests.soft_authenticator import SoftAuthenticator
 from tests.test_auth_login import login, make_user
 from tests.test_auth_mfa import add_key
+from tests.test_enrollment_access import enrol
+
 
 
 
@@ -96,7 +98,6 @@ def test_a_wrong_email_or_unknown_user_gets_the_same_answer(app, client):
 
 
 # --- K48 ---
-@NEEDS_ENROLMENT
 def test_a_citizen_without_an_enrolment_gets_a_reset_link(app, client):
     make_account(app)
     ask(client)
@@ -104,8 +105,6 @@ def test_a_citizen_without_an_enrolment_gets_a_reset_link(app, client):
     assert response.status_code == 200
     assert latest_token(app, "recovery_reset") is not None
 
-
-@NEEDS_ENROLMENT
 def test_an_enrolled_citizen_must_also_know_their_details(app):
     make_account(app)
     voter = app.test_client()
@@ -126,7 +125,6 @@ def test_an_enrolled_citizen_must_also_know_their_details(app):
     assert confirm(client, latest_token(app, "recovery"),
                    date_of_birth="1990-04-12", postcode="3053").status_code == 200
 
-@NEEDS_ENROLMENT
 def test_each_emailed_link_allows_one_guess(app, client):
     """A wrong guess uses the link up, so details cannot be guessed over and over."""
     make_account(app)
@@ -290,3 +288,35 @@ def test_flask_outbox_prints_working_recovery_links(app, client):
     ask(client)
     output = app.test_cli_runner().invoke(args=["outbox"]).output
     assert re.search(r"/recover/confirm#token=[A-Za-z0-9_-]+", output)
+
+# --- K52 ---
+
+def test_only_an_administrator_with_mfa_reaches_the_admin_page(app, client):
+    assert client.get("/admin").headers["Location"].endswith("/login")
+
+    make_account(app)
+    login(client, "alice", "Correct-Horse-42")
+    assert client.get("/admin").headers["Location"].endswith("/dashboard")
+    client.post("/auth/logout", headers=csrf_headers(client))
+
+    make_account(app, username="admin1", role="administrator")
+    login(client, "admin1", "Correct-Horse-42")
+    assert client.get("/admin").headers["Location"].endswith("/mfa")  # R08 first
+    verify_mfa(app)
+    response = client.get("/admin")
+    assert response.status_code == 200
+    assert 'id="staff-form"' in response.get_data(as_text=True)
+    assert 'href="/admin"' in client.get("/dashboard").get_data(as_text=True)
+
+
+def test_the_dashboard_links_each_role_to_its_own_page(app):
+    """Citizens see Austin's enrolment page; administrators see administration."""
+    make_account(app)
+    citizen = app.test_client()
+    login(citizen, "alice", "Correct-Horse-42")
+    body = citizen.get("/dashboard").get_data(as_text=True)
+    assert 'href="/my-enrolment"' in body and 'href="/admin"' not in body
+
+    admin = admin_client(app)
+    body = admin.get("/dashboard").get_data(as_text=True)
+    assert 'href="/admin"' in body and 'href="/my-enrolment"' not in body
