@@ -39,3 +39,18 @@ def test_staff_are_sent_back_to_their_dashboard(app, client):
     response = client.get("/my-enrolment")
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/dashboard")
+
+def test_no_page_script_writes_html():
+    """R04: every script shows server data with textContent. A script that wrote
+    HTML (innerHTML and friends) could turn a stored value into running code."""
+    from pathlib import Path
+
+    banned = ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write")
+    scripts = Path(__file__).resolve().parent.parent / "app" / "static" / "js"
+    assert list(scripts.glob("*.js")), "no scripts found: check the path"
+    for script in scripts.glob("*.js"):
+        for number, line in enumerate(script.read_text().splitlines(), 1):
+            if line.strip().startswith("//"):
+                continue  # comments may mention them, as warnings
+            for name in banned:
+                assert name not in line, f"{script.name}:{number} uses {name}"
