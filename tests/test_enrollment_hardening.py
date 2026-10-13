@@ -440,3 +440,48 @@ def test_staff_cannot_register_a_child_either(app):
     user_id = citizen_without_a_login(app)
     emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
     assert staff_register(emma, user_id, date_of_birth="2020-01-01").status_code == 400
+
+# --- A33 ---
+
+def test_voting_details_share_only_what_the_voting_side_needs(app):
+    from datetime import date
+
+    from app.models.enrollment_models import Enrolment
+    from app.models.user import User
+    from app.security.enrollment_security import voting_details_for
+
+    record_id = vic_record(app)  # born 1990-04-12, still pending
+    with app.app_context():
+        alice = User.query.filter_by(username="alice").one()
+        # pending is not enrolled: only an approved enrolment counts
+        assert voting_details_for(alice, date(2026, 5, 2)) == {
+            "enrolled": False, "state": None, "old_enough": False}
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    dana.post(f"/enrollment/{record_id}/decision", json={"decision": "approved"},
+              headers=csrf_headers(dana))
+    with app.app_context():
+        alice = User.query.filter_by(username="alice").one()
+        details = voting_details_for(alice, date(2026, 5, 2))
+        assert details == {"enrolled": True, "state": "VIC", "old_enough": True}
+        # no name, address or birth date crosses to the voting side
+        assert set(details) == {"enrolled", "state", "old_enough"}
+
+
+def test_a_seventeen_year_old_is_enrolled_but_not_old_enough_yet(app):
+    from datetime import date
+
+    from app.models.user import User
+    from app.security.enrollment_security import voting_details_for
+
+    alice = citizen_client(app)
+    enrol(alice, date_of_birth="2008-11-01")  # 17 on the day below, 18 a month later
+    with app.app_context():
+        from app.models.enrollment_models import Enrolment
+        record_id = Enrolment.query.one().id
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    dana.post(f"/enrollment/{record_id}/decision", json={"decision": "approved"},
+              headers=csrf_headers(dana))
+    with app.app_context():
+        user = User.query.filter_by(username="alice").one()
+        assert voting_details_for(user, date(2026, 10, 1))["old_enough"] is False
+        assert voting_details_for(user, date(2026, 11, 1))["old_enough"] is True
