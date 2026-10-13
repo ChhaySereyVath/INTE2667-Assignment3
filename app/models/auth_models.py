@@ -81,3 +81,35 @@ class LoginThrottle(db.Model):
     failures = db.Column(db.Integer, nullable=False, default=0)
     first_failure_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     locked_until = db.Column(db.DateTime)
+
+
+class WebAuthnCredential(db.Model):
+    """R08: a registered security key or passkey. Only the PUBLIC key is stored:
+    the private key never leaves the person's device, so a stolen database copy
+    cannot be used to sign in."""
+
+    __tablename__ = "webauthn_credentials"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    credential_id = db.Column(db.String(255), nullable=False, unique=True)
+    public_key = db.Column(db.LargeBinary, nullable=False)
+    sign_count = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    last_used_at = db.Column(db.DateTime)
+
+
+class MfaChallenge(db.Model):
+    """R08: one random challenge per attempt, tied to one session, valid for two
+    minutes and usable once. This is what makes a replayed answer worthless."""
+
+    __tablename__ = "mfa_challenges"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    session_id = db.Column(db.String(36), db.ForeignKey("user_sessions.id"), nullable=False)
+    purpose = db.Column(db.String(20), nullable=False)  # register or authenticate
+    challenge = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime)

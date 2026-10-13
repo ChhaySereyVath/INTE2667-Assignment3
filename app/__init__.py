@@ -46,6 +46,12 @@ def create_app(test_config=None):
         LOGIN_MAX_FAILURES_PER_ACCOUNT=20,
         LOGIN_LOCK_MINUTES_PER_ACCOUNT=5,
         LOGIN_FAILURE_WINDOW_MINUTES=60,
+        # R08: WebAuthn. The RP ID is the site's domain; the origin is the exact
+        # address the browser shows. A key's answer for any other origin is refused.
+        WEBAUTHN_RP_ID="localhost",
+        WEBAUTHN_RP_NAME="AEC Voting Platform",
+        WEBAUTHN_ORIGIN="http://localhost:5000",
+        MFA_CHALLENGE_SECONDS=120,
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
