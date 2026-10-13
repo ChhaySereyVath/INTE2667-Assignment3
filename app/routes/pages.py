@@ -36,6 +36,12 @@ def register_page():
     """Registration form. Posts to /auth/register with fetch()."""
     return render_template("auth/register.html")
 
+@pages_bp.route("/activate")
+def activate_page():
+    """Activation page. The token is in the URL fragment, which never reaches
+    this route: the page's script reads it and POSTs it (R09)."""
+    return render_template("auth/activate.html")
+
 @pages_bp.route("/dashboard")
 @page_login_required
 def dashboard(current_user):

@@ -110,3 +110,35 @@ def test_register_page_renders_a_form(client):
 
 def test_signed_out_visitors_see_a_register_link(client):
     assert 'href="/register"' in client.get("/").get_data(as_text=True)
+
+
+def test_activate_page_renders_without_a_token_in_the_request(client):
+    response = client.get("/activate")
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "activate.js" in body
+    assert INLINE_SCRIPT.search(body) is None
+
+# --- K39 ---
+def test_flask_outbox_prints_a_working_activation_link(app, client):
+    import re
+
+    client.post("/auth/register", json={"username": "newvoter", "email": "new.voter@example.com",
+                                        "password": "Correct-Horse-42"})
+    result = app.test_cli_runner().invoke(args=["outbox"])
+    assert result.exit_code == 0
+    assert "to newvoter: activation" in result.output
+    token = re.search(r"/activate#token=([A-Za-z0-9_-]+)", result.output).group(1)
+    # the printed link really activates the account
+    assert client.post("/auth/activate", json={"token": token}).status_code == 200
+
+
+def test_there_is_no_web_page_for_the_outbox(client):
+    # the inbox is terminal-only on purpose: a page would expose everyone's links
+    for path in ("/outbox", "/auth/outbox", "/admin/outbox"):
+        assert client.get(path).status_code == 404
+
+
+def test_an_empty_outbox_says_so(app):
+    result = app.test_cli_runner().invoke(args=["outbox"])
+    assert "The outbox is empty." in result.output

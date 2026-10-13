@@ -273,3 +273,31 @@ def create_staff_account(created_by, username, email, role, states, temporary_pa
     token = issue_token(user, "activation", current_app.config["ACTIVATION_TOKEN_HOURS"])
     queue_notification(user, "activation", token=token)
     return user
+
+# --- K39: the simulated inbox ------------------------------------------------------
+
+# which page each kind of message links to (Round 4 adds the recovery pages)
+LINK_PAGES = {"activation": "/activate"}
+
+
+@click.command("outbox")
+@click.option("--limit", default=10, show_default=True, help="How many messages to show")
+@with_appcontext
+def outbox_command(limit):
+    """Print the newest simulated emails: flask outbox
+
+    This runs only in the server's own terminal. There is deliberately no web page
+    for it, because it shows live activation links for every account.
+    """
+    base = current_app.config.get("PUBLIC_BASE_URL", "http://localhost:5000")
+    rows = Notification.query.order_by(Notification.id.desc()).limit(limit).all()
+    if not rows:
+        click.echo("The outbox is empty.")
+        return
+    for row in rows:
+        user = db.session.get(User, row.user_id)
+        click.echo(f"[{row.created_at:%Y-%m-%d %H:%M}] to {user.username}: {row.template}")
+        fields = json.loads(row.payload or "{}")
+        page = LINK_PAGES.get(row.template)
+        if page and "token" in fields:
+            click.echo(f"    {base}{page}#token={fields['token']}")

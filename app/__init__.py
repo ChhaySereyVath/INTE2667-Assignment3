@@ -65,6 +65,10 @@ def create_app(test_config=None):
     from app.security.auth_security import create_user_command
     app.cli.add_command(create_user_command) # R09: CLI command to create a test account
 
+    from app.security.auth_security import create_user_command, outbox_command
+    app.cli.add_command(create_user_command)
+    app.cli.add_command(outbox_command)
+
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
