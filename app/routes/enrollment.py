@@ -118,6 +118,29 @@ def update_own_address(current_user):
     db.session.commit()
     return jsonify({"enrolment": enrolment.to_dict()}), 200
 
+@enrollment_bp.route("/pending", methods=["GET"])
+@permission_required("enrolment:staff:read")
+def pending_queue(current_user):
+    """R03/R11: pending enrolments in the states this staff member works in.
+
+    The list carries ids, states and dates only. Opening one record is a separate,
+    scoped and logged read (A13, A22), so the queue itself exposes nobody's details.
+    """
+    from app.models.auth_models import user_states
+
+    states = user_states(current_user)
+    rows = []
+    if states:
+        rows = (Enrolment.query
+                .filter(Enrolment.status == "pending", Enrolment.state.in_(states))
+                .order_by(Enrolment.created_at).all())
+    queue = [dict(row.summary(),
+                  received_at=row.created_at.isoformat(),
+                  # R03 maker-checker, shown in the page: you cannot approve your own
+                  registered_by_you=row.registered_by == current_user.id)
+             for row in rows]
+    return jsonify({"enrolments": queue}), 200
+
 @enrollment_bp.route("/<record_id>", methods=["GET"])
 @permission_required("enrolment:staff:read")
 def staff_read_enrolment(current_user, record_id):

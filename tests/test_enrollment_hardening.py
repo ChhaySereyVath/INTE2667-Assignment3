@@ -150,3 +150,41 @@ def test_purge_removes_only_history_past_the_retention_period(app):
     with app.app_context():
         remaining = EnrolmentHistory.query.one()
         assert remaining.field == "enrolment"  # the recent row is still there
+
+# --- A26 ---
+
+def test_the_queue_lists_only_pending_records_in_your_states(app):
+    from tests.test_enrollment_workflow import citizen_without_a_login, staff_register
+
+    vic_id = citizen_without_a_login(app, "citizen1")
+    nsw_id = citizen_without_a_login(app, "citizen2")
+    vic_staff = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    nsw_staff = staff_client(app, "noah.nsw", "aec_employee", ["NSW"])
+    staff_register(vic_staff, vic_id)
+    staff_register(nsw_staff, nsw_id, given_name="Sam", family_name="Other", state="NSW")
+
+    queue = vic_staff.get("/enrollment/pending").get_json()["enrolments"]
+    assert [item["state"] for item in queue] == ["VIC"]
+    # ids, states and dates only: nobody's details are in the list (R02)
+    assert set(queue[0]) == {"id", "state", "status", "received_at", "registered_by_you"}
+    assert queue[0]["registered_by_you"] is True
+
+
+def test_decided_records_leave_the_queue(app):
+    from tests.test_enrollment_workflow import citizen_without_a_login, staff_register
+
+    user_id = citizen_without_a_login(app)
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    staff_register(emma, user_id)
+    record_id = emma.get("/enrollment/pending").get_json()["enrolments"][0]["id"]
+    dana = staff_client(app, "dana.vic", "commissioner_delegate", ["VIC"])
+    assert dana.get("/enrollment/pending").get_json()["enrolments"][0]["registered_by_you"] is False
+    dana.post(f"/enrollment/{record_id}/decision", json={"decision": "approved"},
+              headers=csrf_headers(dana))
+    assert dana.get("/enrollment/pending").get_json()["enrolments"] == []
+
+
+def test_citizens_cannot_see_the_queue(app):
+    alice = citizen_client(app)
+    assert alice.get("/enrollment/pending").status_code == 403
+
