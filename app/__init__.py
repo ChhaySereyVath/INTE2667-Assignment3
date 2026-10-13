@@ -55,7 +55,12 @@ def create_app(test_config=None):
         WEBAUTHN_RP_NAME="AEC Voting Platform",
         WEBAUTHN_ORIGIN=os.environ.get("WEBAUTHN_ORIGIN", "http://localhost:5000"),
         MFA_CHALLENGE_SECONDS=120,
-        RECOVERY_TOKEN_HOURS=0.5,  # R10: recovery links expire after 30 minutes
+        RECOVERY_TOKEN_HOURS=0.5,  # R10: recovery links expire after 30 minutes,
+        # R07: where backups and restore reports go, and how long backups are kept
+        BACKUP_DIR="backups",
+        BACKUP_RETENTION_DAYS=90,
+        RESTORE_REPORT_DIR="docs/restore-reports",
+        BACKUP_KEY=os.environ.get("BACKUP_KEY")
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
@@ -81,6 +86,11 @@ def create_app(test_config=None):
     from app.security.auth_security import create_user_command, outbox_command
     app.cli.add_command(create_user_command)
     app.cli.add_command(outbox_command)
+
+    from app.security.backup import backup_command, restore_command, verify_backup_command
+    app.cli.add_command(backup_command)
+    app.cli.add_command(verify_backup_command)
+    app.cli.add_command(restore_command)
 
     from app.security.enrollment_security import purge_history_command
     app.cli.add_command(purge_history_command)

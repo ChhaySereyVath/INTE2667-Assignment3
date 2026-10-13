@@ -16,6 +16,7 @@ def make_test_config(**overrides):
         "JWT_SECRET_KEY": secrets.token_hex(32),
         "DATA_ENC_KEY": secrets.token_hex(32),
         "BLIND_INDEX_KEY": secrets.token_hex(32),
+        "BACKUP_KEY": secrets.token_hex(32),
         "WEBAUTHN_ORIGIN": "http://localhost:5000",  # tests never depend on your .env
         "SQLALCHEMY_DATABASE_URI": "sqlite://",  # in memory: nothing is written to disk
         "PREFERRED_URL_SCHEME": "https",  # the test client uses https, so Secure cookies work

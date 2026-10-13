@@ -244,3 +244,79 @@ def test_session_cookies_are_never_sent_over_plain_http(app, client):
     cookies = login(client, "alice", "Correct-Horse-42").headers.getlist("Set-Cookie")
     assert all("Secure" in cookie for cookie in cookies)
 
+# --- A29 ---
+
+def backup_of_some_data(app, tmp_path):
+    from app.security.backup import create_backup
+
+    vic_record(app)  # a citizen called alice with an encrypted enrolment
+    with app.app_context():
+        return create_backup(tmp_path)
+
+
+def test_a_backup_file_contains_nothing_readable(app, tmp_path):
+    data = backup_of_some_data(app, tmp_path).read_bytes()
+    assert b"SQLite format 3" not in data  # not even recognisable as a database
+    assert b"alice" not in data  # usernames are plain in the live database, not here
+
+
+def test_a_backup_restores_to_the_same_data(app, tmp_path):
+    import sqlite3
+
+    from app.security.backup import restore_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    with app.app_context():
+        target = restore_backup(path, tmp_path / "restored.db")
+    connection = sqlite3.connect(target)
+    assert connection.execute("SELECT username FROM users").fetchall() == [("alice",)]
+    assert connection.execute("SELECT COUNT(*) FROM enrolments").fetchone()[0] == 1
+    connection.close()
+
+
+def test_a_damaged_or_renamed_backup_is_refused(app, tmp_path):
+    import pytest
+
+    from app.security.backup import read_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    renamed = path.with_name("evp-20200101-000000-000000.db.enc")
+    path.rename(renamed)
+    with app.app_context(), pytest.raises(ValueError):
+        read_backup(renamed)  # the name is part of what was encrypted
+
+    damaged = bytearray(renamed.read_bytes())
+    damaged[-1] ^= 0x01
+    renamed.write_bytes(bytes(damaged))
+    with app.app_context(), pytest.raises(ValueError):
+        read_backup(renamed)
+
+
+def test_backups_use_their_own_key_and_fail_closed_without_it(app, tmp_path):
+    import secrets
+
+    import pytest
+
+    from app.security.backup import create_backup, read_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    with app.app_context():
+        app.config["BACKUP_KEY"] = secrets.token_hex(32)  # someone else's key
+        with pytest.raises(ValueError):
+            read_backup(path)
+        app.config["BACKUP_KEY"] = None
+        with pytest.raises(RuntimeError):
+            create_backup(tmp_path)  # no key, no backup: never an unencrypted one
+
+
+def test_restore_never_overwrites_an_existing_file(app, tmp_path):
+    import pytest
+
+    from app.security.backup import restore_backup
+
+    path = backup_of_some_data(app, tmp_path)
+    existing = tmp_path / "live.db"
+    existing.write_bytes(b"precious")
+    with app.app_context(), pytest.raises(FileExistsError):
+        restore_backup(path, existing)
+    assert existing.read_bytes() == b"precious"

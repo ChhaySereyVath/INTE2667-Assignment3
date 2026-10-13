@@ -96,3 +96,34 @@ def blind_index(value):
 def normalise_identity(given_name, family_name, date_of_birth):
     """'given|family|YYYY-MM-DD', used to match a person against the citizen registry."""
     return f"{_normalise(given_name)}|{_normalise(family_name)}|{date_of_birth}"
+
+# --- A29: whole-file encryption for backups -----------------------------------------
+
+BACKUP_MAGIC = b"EVPB1"
+
+
+def encrypt_bytes(data, aad, key_name="BACKUP_KEY"):
+    """R01: encrypt a whole file (a database backup) with AES-256-GCM.
+
+    Layout: 'EVPB1' + key id (8 chars) + 12-byte nonce + ciphertext. Backups use their
+    OWN key, so a leaked DATA_ENC_KEY does not open old backups, and the reverse.
+    """
+    key = _load_key(key_name)
+    nonce = os.urandom(NONCE_BYTES)
+    ciphertext = AESGCM(key).encrypt(nonce, data, aad.encode("utf-8"))
+    return BACKUP_MAGIC + _key_id(key).encode("ascii") + nonce + ciphertext
+
+
+def decrypt_bytes(blob, aad, key_name="BACKUP_KEY"):
+    """Reverse of encrypt_bytes. One generic error for any problem (S03)."""
+    key = _load_key(key_name)
+    try:
+        if not blob.startswith(BACKUP_MAGIC):
+            raise ValueError("not a backup")
+        key_id = blob[5:13].decode("ascii")
+        if key_id != _key_id(key):
+            raise ValueError("wrong key")
+        nonce, ciphertext = blob[13:13 + NONCE_BYTES], blob[13 + NONCE_BYTES:]
+        return AESGCM(key).decrypt(nonce, ciphertext, aad.encode("utf-8"))
+    except Exception:
+        raise ValueError("Decryption failed") from None
