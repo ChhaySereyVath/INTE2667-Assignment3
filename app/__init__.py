@@ -72,9 +72,11 @@ def create_app(test_config=None):
     from app.security.auth_security import create_user_command
     app.cli.add_command(create_user_command) # R09: CLI command to create a test account
 
-    from app.security.auth_security import create_user_command, outbox_command
-    app.cli.add_command(create_user_command)
-    app.cli.add_command(outbox_command)
+    try:
+        from app.security.auth_security import outbox_command
+        app.cli.add_command(outbox_command)
+    except ImportError:
+        pass  # outbox_command is optional — not all team members implement it
 
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
