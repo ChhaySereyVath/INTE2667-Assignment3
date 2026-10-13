@@ -36,6 +36,8 @@ ADDRESS_SCHEMA = {
     "state": {"type": str, "required": True, "enum": STATES},
 }
 
+STAFF_REGISTER_SCHEMA = dict(ENROL_SCHEMA, user_id={"type": "uuid", "required": True})
+
 def _write_enrolment(enrolment, cleaned):
     """Encrypt each field onto the row. The row must already have its id."""
     for field in ("given_name", "family_name", "address_line", "suburb", "postcode"):
@@ -120,3 +122,22 @@ def staff_read_enrolment(current_user, record_id):
     """R11: a staff member reads a record, but only in a state they are assigned to."""
     enrolment = get_scoped_or_404(record_id, current_user, "read")
     return jsonify({"enrolment": enrolment.to_dict()}), 200
+
+@enrollment_bp.route("/staff/register", methods=["POST"])
+@permission_required("enrolment:staff:register")
+def staff_register(current_user):
+    """R03: an AEC employee registers a citizen who cannot do it themselves."""
+    ok, cleaned, errors = validate(request.get_json(silent=True), STAFF_REGISTER_SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request", "fields": errors}), 400
+    from app.models.auth_models import user_states
+
+    if cleaned["state"] not in user_states(current_user):
+        # R12: least privilege. A Victorian employee cannot register someone in NSW.
+        return jsonify({"error": "Access denied"}), 403
+
+    enrolment, problem = _create_enrolment(str(cleaned["user_id"]), cleaned, current_user,
+                                           registered_by=current_user.id)
+    if problem is not None:
+        return jsonify({"error": "Already enrolled"}), 409
+    return jsonify({"enrolment": enrolment.summary()}), 201
