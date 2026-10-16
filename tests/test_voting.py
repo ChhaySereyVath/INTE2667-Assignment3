@@ -102,3 +102,45 @@ def test_the_database_allows_one_entitlement_per_contest(app):
                                        contest_id=existing.contest_id, contest_type="house"))
         with pytest.raises(IntegrityError):
             db.session.commit()
+
+
+# --- Y10 ---
+
+def test_an_enrolled_adult_is_eligible_during_polling(app):
+    from app.models.user import User
+    from app.security.voting_security import check_eligibility
+
+    election_id, _ = polling_election(app, "alice")
+    try:
+        with app.app_context():
+            decision = check_eligibility(User.query.filter_by(username="alice").one(),
+                                         db.session.get(Election, election_id), "house")
+            assert decision.eligible and decision.reason == "eligible"
+    finally:
+        clock.unfreeze()
+
+
+def test_each_rule_gives_its_own_reason(app):
+    from app.models.user import User
+    from app.security.voting_security import check_eligibility
+
+    election_id = make_election(app)
+    approved_voter(app, "alice")
+    approved_voter(app, "teen", date_of_birth="2009-01-01")  # 17 on polling day
+    open_polling(app, election_id)
+    approved_voter(app, "late")  # enrolled after the roll closed
+    with app.app_context():
+        make_user(username="nobody")
+        election = db.session.get(Election, election_id)
+        person = {u.username: u for u in User.query.all()}
+        try:
+            clock.freeze(datetime(2026, 5, 2, 7, 0, 0))
+            assert check_eligibility(person["alice"], election, "house").reason == "outside_polling_hours"
+            clock.freeze(DURING_POLLING)
+            assert check_eligibility(person["nobody"], election, "house").reason == "not_enrolled"
+            assert check_eligibility(person["teen"], election, "house").reason == "under_18"
+            assert check_eligibility(person["late"], election, "house").reason == "not_on_roll_for_this_election"
+            election.status = "polling_closed"
+            assert check_eligibility(person["alice"], election, "house").reason == "polling_not_open"
+        finally:
+            clock.unfreeze()
