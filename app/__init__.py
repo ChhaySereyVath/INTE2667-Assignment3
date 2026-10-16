@@ -100,6 +100,9 @@ def create_app(test_config=None):
     from app.security.election_security import seed_election_command
     app.cli.add_command(seed_election_command)
 
+    from app.security.load_test import load_test_command
+    app.cli.add_command(load_test_command)
+
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
 
