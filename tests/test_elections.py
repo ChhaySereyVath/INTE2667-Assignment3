@@ -66,3 +66,18 @@ def test_candidates_are_listed_in_ballot_order_and_hold_no_voter_data(app):
             "Avery Lin", "Blake Okafor", "Casey Nguyen"]
         columns = {c.name for c in Candidate.__table__.columns}
         assert not {"user_id", "voter_id", "votes"} & columns
+
+
+# --- Y02 ---
+
+def test_an_election_moves_one_step_at_a_time(app):
+    from app.security.election_security import change_election_status
+
+    election_id = make_election(app, status="draft")
+    with app.app_context():
+        election, actor = db.session.get(Election, election_id), User.query.first()
+        assert not change_election_status(election, actor, "polling_open")  # skipping a step
+        assert change_election_status(election, actor, "nominations_open")
+        assert change_election_status(election, actor, "polling_open")
+        assert not change_election_status(election, actor, "nominations_open")  # no going back
+        assert election.status == "polling_open"
