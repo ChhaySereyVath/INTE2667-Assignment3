@@ -131,3 +131,26 @@ def test_the_status_endpoint_refuses_steps_out_of_order(app):
     good = dana.post(f"/elections/{election_id}/status", headers=csrf_headers(dana),
                      json={"status": "nominations_open"})
     assert good.status_code == 200 and good.get_json()["election"]["status"] == "nominations_open"
+
+
+# --- Y04 ---
+
+def test_seed_election_creates_a_demo_election_with_candidates(app):
+    with app.app_context():
+        make_user(username="dana", role="commissioner_delegate")
+    result = app.test_cli_runner().invoke(args=["seed-election", "--creator", "dana"])
+    assert "with 16 contests" in result.output
+    with app.app_context():
+        election = Election.query.one()
+        assert election.status == "nominations_open"
+        house = Contest.query.filter_by(contest_type="house", state="VIC").one()
+        assert len(house.candidates) == 4
+
+
+def test_seed_election_needs_a_delegate(app):
+    with app.app_context():
+        make_user(username="alice")
+    result = app.test_cli_runner().invoke(args=["seed-election", "--creator", "alice"])
+    assert result.exit_code != 0
+    with app.app_context():
+        assert Election.query.count() == 0

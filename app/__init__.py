@@ -95,6 +95,9 @@ def create_app(test_config=None):
     from app.security.enrollment_security import purge_history_command
     app.cli.add_command(purge_history_command)
 
+    from app.security.election_security import seed_election_command
+    app.cli.add_command(seed_election_command)
+
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
 
