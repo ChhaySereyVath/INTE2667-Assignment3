@@ -20,6 +20,8 @@ def make_test_config(**overrides):
         "WEBAUTHN_ORIGIN": "http://localhost:5000",  # tests never depend on your .env
         "SQLALCHEMY_DATABASE_URI": "sqlite://",  # in memory: nothing is written to disk
         "PREFERRED_URL_SCHEME": "https",  # the test client uses https, so Secure cookies work
+        # R06 limits would trip tests that log in many times; Yufei's tests turn them on
+        "RATELIMIT_ENABLED": False,
     }
     config.update(overrides)
     return config
