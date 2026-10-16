@@ -24,8 +24,15 @@ def rate_key():
 limiter = Limiter(key_func=rate_key, default_limits=[DEFAULT_LIMIT],
                   storage_uri="memory://", headers_enabled=True)
 
-# Tighter limits for the endpoints attackers aim at (Y06 fills this in).
-ROUTE_LIMITS = {}
+# Tighter limits for the endpoints attackers aim at. Login, registration and
+# recovery are counted per IP (there is no account yet); voting per account.
+ROUTE_LIMITS = {
+    "auth.login": ("10 per minute", get_remote_address),
+    "auth.register": ("5 per minute", get_remote_address),
+    "auth.activate": ("10 per minute", get_remote_address),
+    "recovery.request_recovery": ("3 per minute", get_remote_address),
+    "recovery.confirm_recovery": ("5 per minute", get_remote_address),
+}
 
 
 def install_rate_limits(app):

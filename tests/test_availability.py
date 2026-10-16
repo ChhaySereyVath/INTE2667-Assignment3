@@ -44,3 +44,26 @@ def test_signed_in_users_are_counted_per_account_not_per_ip(limited_app):
     cookie = client.get_cookie("access_token_cookie").value
     with limited_app.test_request_context("/", headers={"Cookie": f"access_token_cookie={cookie}"}):
         assert rate_key().startswith("user:")
+
+
+# --- Y06 ---
+
+def test_login_attempts_are_limited_per_computer(limited_app):
+    """R06: 'Failed-login and automated abuse attempts are throttled.' This is on top
+    of Ken's per-account lock: it slows a script trying MANY usernames."""
+    client = limited_app.test_client()
+    statuses = [client.post("/auth/login", json={"username": f"user{n}", "password": "x" * 12}).status_code
+                for n in range(11)]
+    assert statuses[:10] == [401] * 10  # ten different usernames, all simply wrong
+    assert statuses[10] == 429
+
+
+def test_registration_and_recovery_are_limited(limited_app):
+    client = limited_app.test_client()
+    register = [client.post("/auth/register", json={"username": f"new{n}", "email": f"n{n}@example.com",
+                                                    "password": "Correct-Horse-42"}).status_code
+                for n in range(6)]
+    assert register == [202] * 5 + [429]
+    recover = [client.post("/auth/recovery/request", json={"username": "x", "email": "x@example.com"}).status_code
+               for _ in range(4)]
+    assert recover == [202] * 3 + [429]
