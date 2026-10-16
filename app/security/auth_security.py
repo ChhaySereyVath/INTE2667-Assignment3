@@ -164,11 +164,16 @@ def _throttle_row(scope, username, ip):
     """One row per (scope, username, IP). The key is hashed, never readable (R02)."""
     material = f"{scope}|{username.lower()}|{ip if scope == 'account_ip' else ''}"
     key_hash = blind_index(material)
-    row = LoginThrottle.query.filter_by(key_hash=key_hash).first()
-    if row is None:
-        row = LoginThrottle(key_hash=key_hash, scope=scope, failures=0, first_failure_at=utcnow())
-        db.session.add(row)
-    return row
+    # R06 (Yufei): create the row if it is missing AND take the database's write lock,
+    # in one statement. Parallel login attempts then queue here one by one: they can
+    # neither create the row twice (a crash) nor overwrite each other's failure count
+    # (which would let a script running many guesses at once dodge the lock).
+    from sqlalchemy.dialects.sqlite import insert
+
+    db.session.execute(insert(LoginThrottle)
+                       .values(key_hash=key_hash, scope=scope, failures=0, first_failure_at=utcnow())
+                       .on_conflict_do_nothing(index_elements=["key_hash"]))
+    return LoginThrottle.query.filter_by(key_hash=key_hash).populate_existing().one()
 
 def _limits(scope):
     if scope == "account_ip":
