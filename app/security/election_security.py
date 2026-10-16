@@ -25,10 +25,17 @@ def create_election(actor, name, polling_opens_at, polling_closes_at):
 
 
 def change_election_status(election, actor, new_status):
-    """Move an election along its workflow. Returns True if the move was allowed."""
+    """Move an election along its workflow. Returns True if the move was allowed.
+
+    Opening polling hands out entitlements (R17): one per approved enrolment per
+    contest in that person's state. The electoral roll closes at that moment, as it
+    does in a real election before polling day.
+    """
     if new_status not in ELECTION_TRANSITIONS.get(election.status, ()):
         return False
     previous, election.status = election.status, new_status
+    if new_status == "polling_open":
+        issue_entitlements(election)
     return True
 
 
@@ -67,3 +74,16 @@ def seed_election_command(creator):
                                      ballot_position=position))
     db.session.commit()
     click.echo(f"Created election {election.id} with {len(election.contests)} contests.")
+
+
+def issue_entitlements(election):
+    """R17: create every voter's 'unused' entitlements in one go."""
+    from app.models.enrollment_models import Enrolment
+    from app.models.voting_models import VoteEntitlement
+
+    contests = {(c.contest_type, c.state): c for c in election.contests}
+    for user_id, state in db.session.query(Enrolment.user_id, Enrolment.state).filter_by(status="approved"):
+        for contest_type in ("house", "senate"):
+            contest = contests[(contest_type, state)]
+            db.session.add(VoteEntitlement(user_id=user_id, election_id=election.id,
+                                           contest_id=contest.id, contest_type=contest_type))

@@ -1,0 +1,104 @@
+"""R16 eligibility, R17 one vote per contest, R18 ballot secrecy (Yufei)."""
+import json
+import uuid
+from datetime import datetime
+
+from app import db
+from app.models.election_models import Election
+from app.models.enrollment_models import Enrolment
+from app.models.voting_models import VoteEntitlement
+from app.security.election_security import change_election_status
+from app.security.enrollment_security import identity_key
+from app.security.shared_security import clock
+from tests.conftest import csrf_headers
+from tests.test_auth_login import login, make_user
+from tests.test_elections import candidate_ids, contest_of, make_election
+
+DURING_POLLING = datetime(2026, 5, 2, 12, 0, 0)
+
+
+def approved_voter(app, username="alice", state="VIC", date_of_birth="1990-04-12"):
+    """A citizen with an APPROVED enrolment (Austin's model), signed in. Returns the client."""
+    with app.app_context():
+        user = make_user(username=username)
+        enrolment = Enrolment(id=str(uuid.uuid4()), user_id=user.id, state=state, status="approved",
+                              identity_bidx=identity_key(username, "Voter", date_of_birth))
+        for field, value in (("given_name", username), ("family_name", "Voter"),
+                             ("date_of_birth", date_of_birth), ("address_line", "1 Test Street"),
+                             ("suburb", "Carlton"), ("postcode", "3053")):
+            enrolment.set_field(field, value)
+        db.session.add(enrolment)
+        db.session.commit()
+    client = app.test_client()
+    login(client, username, "Correct-Horse-42")
+    return client
+
+
+def open_polling(app, election_id):
+    with app.app_context():
+        election = db.session.get(Election, election_id)
+        delegate = make_user(username="opener", role="commissioner_delegate")
+        assert change_election_status(election, delegate, "polling_open")
+        db.session.commit()
+
+
+def polling_election(app, *voters):
+    """Voters enrolled first, then polling opens (the roll closes), clock in polling hours."""
+    election_id = make_election(app)
+    clients = [approved_voter(app, name) for name in voters]
+    open_polling(app, election_id)
+    clock.freeze(DURING_POLLING)
+    return election_id, clients
+
+
+def check(client, election_id, contest_type="house", **extra):
+    return client.post("/voting/eligibility", headers=csrf_headers(client),
+                       json=dict(election_id=election_id, contest_type=contest_type, **extra))
+
+
+def vote(client, app, election_id, contest_type="house", key=None, preferences=None):
+    contest_id = contest_of(app, election_id, contest_type)
+    headers = dict(csrf_headers(client), **{"Idempotency-Key": key or str(uuid.uuid4())})
+    return client.post("/voting/ballots", headers=headers, json={
+        "election_id": election_id, "contest_type": contest_type,
+        "preferences": preferences if preferences is not None else candidate_ids(app, contest_id)})
+
+
+def ballots(app):
+    from app.models.voting_models import Ballot
+
+    with app.app_context():
+        return Ballot.query.count()
+
+
+# --- Y09 ---
+
+def test_opening_polling_gives_each_enrolled_voter_one_entitlement_per_contest(app):
+    election_id = make_election(app)
+    approved_voter(app, "alice")
+    with app.app_context():
+        user = make_user(username="pending-person")
+        db.session.add(Enrolment(user_id=user.id, state="VIC", status="pending",
+                                 identity_bidx="x" * 64, given_name_enc="-", family_name_enc="-",
+                                 date_of_birth_enc="-", address_line_enc="-", suburb_enc="-",
+                                 postcode_enc="-"))
+        db.session.commit()
+    open_polling(app, election_id)
+    with app.app_context():
+        rows = VoteEntitlement.query.all()
+        assert sorted(r.contest_type for r in rows) == ["house", "senate"]  # alice only
+        assert {r.status for r in rows} == {"unused"}
+
+
+def test_the_database_allows_one_entitlement_per_contest(app):
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
+    election_id, _ = polling_election(app, "alice")
+    clock.unfreeze()
+    with app.app_context():
+        existing = VoteEntitlement.query.filter_by(contest_type="house").one()
+        db.session.add(VoteEntitlement(user_id=existing.user_id, election_id=election_id,
+                                       contest_id=existing.contest_id, contest_type="house"))
+        with pytest.raises(IntegrityError):
+            db.session.commit()
