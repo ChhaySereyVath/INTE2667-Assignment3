@@ -44,5 +44,8 @@ def test_crash_returns_generic_500_without_details(app):
     app.add_url_rule("/crash", "crash", crash)
     response = app.test_client().get("/crash")
     assert response.status_code == 500
-    assert response.get_json() == {"error": "An unexpected error occurred"}
+    body = response.get_json()
+    # R02 (KE09): the body carries only the generic message and a request id
+    assert set(body) == {"error", "request_id"}
+    assert body["error"] == "An unexpected error occurred"
     assert "hunter2" not in response.get_data(as_text=True)
