@@ -11,6 +11,7 @@ from app.security.auth_security import (authenticate, clear_login_failures, crea
 from app.security.mfa_security import (authentication_options, finish_authentication,
                                        finish_registration, has_security_key,
                                        registration_options)
+from app.security.audit_security import append_event
 from app.security.shared_security import login_required, permission_required, utcnow
 from app.security.validators import EMAIL_RE, STATES, USERNAME_RE, validate
 from app.models.user import User
@@ -18,6 +19,15 @@ from app.models.user import User
 auth_bp = Blueprint("auth", __name__)
 
 INVALID_CREDENTIALS = "Invalid credentials"
+
+
+def _audit_login(action, result, username):
+    """R13: record a login attempt by account id only. An unknown username is NOT
+    stored: people sometimes type their password into the username box."""
+    user = User.query.filter_by(username=username).first()
+    append_event(action, result, actor=user, target_type="account",
+                 target_id=user.id if user else None)
+    db.session.commit()
 
 LOGIN_SCHEMA = {
     "username": {"type": str, "required": True, "max": 40},
@@ -46,6 +56,7 @@ def login():
 
     # R09: too many wrong passwords from this computer, or against this account
     if login_is_locked(username, client_ip):
+        _audit_login("login_locked", "denied", username)
         response = jsonify({"error": "Too many requests"})
         response.headers["Retry-After"] = "900"
         return response, 429
@@ -53,8 +64,10 @@ def login():
     user = authenticate(username, password)
     if user is None:
         record_login_failure(username, client_ip)
+        _audit_login("login_failed", "failure", username)
         return jsonify({"error": INVALID_CREDENTIALS}), 401
     clear_login_failures(username, client_ip)
+    _audit_login("login_success", "success", username)
 
     token = start_session(user)
     response = jsonify({
@@ -79,6 +92,7 @@ def logout(current_user):
     """End the session on the server, not just in the browser (R21)."""
     g.current_session.revoked_at = utcnow()
     g.current_session.revoke_reason = "logout"
+    append_event("logout", "success", current_user, "account", current_user.id)
     db.session.commit()
     response = jsonify({"message": "Logged out"})
     unset_jwt_cookies(response)
@@ -251,6 +265,10 @@ def mfa_authenticate_finish(current_user):
         return refused
     credential = request.get_json(silent=True)
     if not isinstance(credential, dict) or not finish_authentication(current_user, g.current_session, credential):
+        append_event("mfa_failed", "failure", current_user, "account", current_user.id)
+        db.session.commit()
         return jsonify({"error": MFA_FAILED}), 400
+    append_event("mfa_success", "success", current_user, "account", current_user.id)
+    db.session.commit()
     return _mfa_passed_response("Security key accepted")
 
