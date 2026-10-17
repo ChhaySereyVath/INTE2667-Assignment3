@@ -93,3 +93,28 @@ def clean_details(details):
         else:
             cleaned[key] = str(value)[:MAX_DETAIL_LENGTH]
     return cleaned
+
+
+def chain_problems(events, head):
+    """R14: recompute a chain. `events` in seq order; `head` is the end marker row.
+    Returns a list of problems; empty means intact. (Yufei's restore test reuses this
+    on a restored backup, so it takes plain rows rather than querying itself.)"""
+    problems = []
+    expected_prev, expected_seq = GENESIS_HASH, 1
+    for event in events:
+        if event.seq != expected_seq:
+            problems.append(f"event {expected_seq} is missing")  # deleted, or seq edited
+            expected_seq = event.seq
+        if event.prev_hash != expected_prev:
+            problems.append(f"event {event.seq} does not follow the event before it")
+        if compute_hash(event.prev_hash, event) != event.record_hash:
+            problems.append(f"event {event.seq} has been altered")
+        expected_prev, expected_seq = event.record_hash, event.seq + 1
+    if head is not None and (head.seq != expected_seq - 1 or head.record_hash != expected_prev):
+        problems.append(f"the trail should end at event {head.seq} but ends at event {expected_seq - 1}")
+    return problems
+
+
+def verify_chain():
+    """R14: check the live trail."""
+    return chain_problems(AuditEvent.query.order_by(AuditEvent.seq).all(), db.session.get(AuditHead, 1))
