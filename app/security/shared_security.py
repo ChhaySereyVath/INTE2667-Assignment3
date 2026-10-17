@@ -212,6 +212,14 @@ def register_security(app):
     """Attach the shared error handlers and security headers to the app."""
 
     @app.before_request
+    def assign_request_id():
+        """R02: every request gets a random id. Error responses show only this id;
+        the server log has the details under the same id."""
+        from app.security.redaction import new_request_id
+
+        g.request_id = new_request_id()
+
+    @app.before_request
     def check_request_origin():
         """R21: 'State-changing requests require valid CSRF or request-origin evidence.'
 
@@ -239,8 +247,9 @@ def register_security(app):
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
         db.session.rollback()  # undo any half-finished database work
-        app.logger.exception("Unhandled error")  # details stay in the server log only
-        return jsonify({"error": GENERIC_ERRORS[500]}), 500
+        # R02: the details go to the (redacted) server log, never to the client
+        app.logger.exception("Unhandled error")
+        return jsonify({"error": GENERIC_ERRORS[500], "request_id": g.get("request_id")}), 500
 
     @app.after_request
     def add_security_headers(response):
@@ -249,6 +258,8 @@ def register_security(app):
             "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
+        if g.get("request_id"):
+            response.headers["X-Request-ID"] = g.request_id
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
         if request.is_secure:

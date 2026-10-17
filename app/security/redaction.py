@@ -59,3 +59,9 @@ def install_redaction(app):
     for logger in [app.logger] + [logging.getLogger(name) for name in REDACTED_LOGGERS]:
         if not any(isinstance(f, RedactingFilter) for f in logger.filters):
             logger.addFilter(redacting)
+
+
+def new_request_id():
+    """R02: a random id that links an error message to its log line, without the
+    message having to contain anything else."""
+    return uuid.uuid4().hex
