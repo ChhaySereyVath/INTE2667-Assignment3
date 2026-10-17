@@ -77,6 +77,8 @@ def create_app(test_config=None):
 
     db.init_app(app)
     jwt.init_app(app)
+    from app.security.redaction import install_redaction
+    install_redaction(app)
     from app.security.shared_security import register_security
     register_security(app) # S03: shared error handlers and security headers
 
