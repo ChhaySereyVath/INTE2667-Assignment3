@@ -101,6 +101,10 @@ def create_app(test_config=None):
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
 
+    from app.security.audit_security import audit_anchor_command, audit_verify_command
+    app.cli.add_command(audit_anchor_command)
+    app.cli.add_command(audit_verify_command)
+
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")

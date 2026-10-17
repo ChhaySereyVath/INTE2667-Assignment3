@@ -102,3 +102,14 @@ def protect_audit(engine):
     with engine.begin() as connection:
         for statement in statements:
             connection.exec_driver_sql(statement)
+
+
+class SecurityAlert(db.Model):
+    """R14: raised when verification finds the audit trail (or other evidence) altered."""
+
+    __tablename__ = "security_alerts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(40), nullable=False)
+    message = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)

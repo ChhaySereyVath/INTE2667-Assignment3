@@ -265,3 +265,40 @@ def test_a_forged_anchor_is_rejected(app):
         handle.write(json.dumps(anchor) + "\n")
     with app.app_context():
         assert verify_anchors() == ["anchor 1 has an invalid signature"]
+
+
+# --- KE07 ---
+
+def test_a_failed_verification_raises_an_alert(app, caplog):
+    """R14: 'Verification failures generate an alert.'"""
+    from app.models.audit_models import SecurityAlert
+    from app.security.audit_security import verify_audit_trail
+
+    three_events(app)
+    as_dba(app, "UPDATE audit_events SET result = 'success' WHERE seq = 2")
+    with app.app_context():
+        assert verify_audit_trail() != []
+        alert = SecurityAlert.query.one()
+        assert alert.kind == "audit_tampering"
+        assert AuditEvent.query.order_by(AuditEvent.seq.desc()).first().action == "audit_verify_failed"
+    assert any(record.levelname == "CRITICAL" for record in caplog.records)
+
+
+def test_a_clean_verification_raises_no_alert(app):
+    from app.models.audit_models import SecurityAlert
+    from app.security.audit_security import verify_audit_trail
+
+    three_events(app)
+    with app.app_context():
+        assert verify_audit_trail() == []
+        assert SecurityAlert.query.count() == 0
+
+
+def test_the_audit_commands_anchor_and_verify(app):
+    three_events(app)
+    runner = app.test_cli_runner()
+    assert "Anchored event 3." in runner.invoke(args=["audit-anchor"]).output
+    assert "Audit trail intact." in runner.invoke(args=["audit-verify"]).output
+    as_dba(app, "DELETE FROM audit_events WHERE seq = 2")
+    result = runner.invoke(args=["audit-verify"])
+    assert result.exit_code == 1 and "FAIL" in result.output
