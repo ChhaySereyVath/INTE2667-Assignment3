@@ -179,15 +179,25 @@ def permission_required(permission):
         @wraps(view)
         def inner(*args, current_user, **kwargs):
             if not has_permission(current_user, permission):
+                _audit_denied(current_user, permission, "no permission")
                 return jsonify({"error": GENERIC_ERRORS[403]}), 403
             if permission in PRIVILEGED_PERMISSIONS and not _mfa_satisfied(current_user):
                 # R08: a privileged action needs more than a password
+                _audit_denied(current_user, permission, "mfa required")
                 return jsonify({"error": GENERIC_ERRORS[403]}), 403
             return view(*args, current_user=current_user, **kwargs)
 
         return login_required(inner)
 
     return decorator
+
+def _audit_denied(user, permission, reason):
+    """R11/R13: every refused permission check goes into the audit trail."""
+    from app.security.audit_security import append_event
+
+    append_event("access_denied", "denied", user, "permission", None,
+                 permission=permission, reason=reason)
+    db.session.commit()
 
 def _mfa_satisfied(user):
     """R08: staff and admin sessions must be MFA-verified. Citizens are not asked."""
