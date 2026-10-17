@@ -36,3 +36,19 @@ def verify(current_user):
     """R14: check the chain and the signed anchors now. A failure raises an alert."""
     problems = verify_audit_trail(current_user)
     return jsonify({"intact": not problems, "problems": problems}), 200
+
+
+@audit_bp.route("/audit")
+@page_login_required
+def audit_page(current_user):
+    """The auditor's screen. The API above enforces everything again."""
+    if not has_permission(current_user, "audit:log:read"):
+        return redirect(url_for("pages.dashboard"))
+    return render_template("audit/audit.html", actions=AUDIT_ACTIONS)
+
+
+@audit_bp.app_context_processor
+def audit_link():
+    """Lets the dashboard show the Audit link to auditors without editing pages.py."""
+    user = g.get("page_user")
+    return {"can_audit": user is not None and has_permission(user, "audit:log:read")}

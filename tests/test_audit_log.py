@@ -454,3 +454,23 @@ def test_an_auditor_can_verify_the_trail(app):
     as_dba(app, "UPDATE audit_events SET result = 'success' WHERE seq = 2")
     response = auditor.post("/audit/verify", headers=csrf_headers(auditor))
     assert response.get_json()["intact"] is False
+
+
+# --- KE14 ---
+
+def test_the_audit_page_is_for_auditors_only(app):
+    from tests.test_auth_pages import INLINE_SCRIPT
+
+    auditor = auditor_client(app)
+    response = auditor.get("/audit")
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200 and INLINE_SCRIPT.search(body) is None
+    assert 'id="verify-button"' in body
+    assert 'href="/audit"' in auditor.get("/dashboard").get_data(as_text=True)
+
+    citizen = app.test_client()
+    with app.app_context():
+        make_user(username="carl")
+    login(citizen, "carl", "Correct-Horse-42")
+    assert citizen.get("/audit").headers["Location"].endswith("/dashboard")
+    assert 'href="/audit"' not in citizen.get("/dashboard").get_data(as_text=True)
