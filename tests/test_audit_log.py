@@ -101,3 +101,27 @@ def test_each_event_carries_the_hash_of_the_one_before(app):
         assert rows[1].prev_hash == rows[0].record_hash
         assert rows[2].prev_hash == rows[1].record_hash
         assert len({row.record_hash for row in rows}) == 3
+
+
+# --- KE03 ---
+
+def test_secrets_and_ballot_choices_never_reach_the_trail(app):
+    """R13: 'Passwords, tokens, keys and ballot choices are excluded from logs.'"""
+    from app.security.audit_security import append_event
+
+    with app.app_context():
+        append_event("login_failed", "failure", None, "account", None,
+                     password="Correct-Horse-42", token="eyJabc.def.ghi", key="00ff" * 16,
+                     preferences=["cand-1", "cand-2"], reason="wrong password")
+        db.session.commit()
+        details = json.loads(AuditEvent.query.one().details)
+    assert details == {"reason": "wrong password"}
+
+
+def test_detail_values_are_cut_short(app):
+    from app.security.audit_security import append_event
+
+    with app.app_context():
+        append_event("access_denied", "denied", reason="x" * 5000)
+        db.session.commit()
+        assert len(json.loads(AuditEvent.query.one().details)["reason"]) == 100
