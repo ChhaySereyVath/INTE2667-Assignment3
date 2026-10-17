@@ -185,3 +185,83 @@ def test_there_is_no_endpoint_that_changes_the_trail(app):
     for rule in app.url_map.iter_rules():
         if rule.rule.startswith("/audit"):
             assert not ({"PUT", "PATCH", "DELETE"} & rule.methods), rule.rule
+
+
+# --- KE06 ---
+
+def test_canonical_json_is_the_same_whatever_the_key_order():
+    from app.security.signing import canonical_json
+
+    assert canonical_json({"b": 1, "a": [2, "x"]}) == canonical_json({"a": [2, "x"], "b": 1}) == '{"a":[2,"x"],"b":1}'
+
+
+def test_a_signature_verifies_only_for_the_exact_data(app):
+    from app.security.signing import public_key_hex, sign, verify
+
+    with app.app_context():
+        public = public_key_hex("ACTION_SIGNING_KEY")
+        signature = sign({"action": "candidate_create", "name": "Morgan"}, "ACTION_SIGNING_KEY")
+        assert verify({"name": "Morgan", "action": "candidate_create"}, signature, public)
+        assert not verify({"action": "candidate_create", "name": "Morgen"}, signature, public)
+        other = public_key_hex("AUDIT_SIGNING_KEY")
+        assert not verify({"action": "candidate_create", "name": "Morgan"}, signature, other)
+
+
+def test_a_rebuilt_chain_is_caught_by_the_signed_anchor(app):
+    """Someone who rewrites an event AND recomputes every hash after it fools the
+    chain. The anchor, signed with a key the database never sees, still catches it."""
+    from app.security.audit_security import verify_anchors, verify_chain, write_anchor
+    from app.security.audit_security import compute_hash
+
+    three_events(app)
+    with app.app_context():
+        write_anchor()
+    as_dba(app, "UPDATE audit_events SET result = 'success' WHERE seq = 2")
+    with app.app_context():
+        rows = AuditEvent.query.order_by(AuditEvent.seq).all()
+        prev = rows[0].record_hash
+        for row in rows[1:]:  # the attacker "fixes" the chain
+            new_hash = compute_hash(prev, row)
+            with db.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "UPDATE audit_events SET prev_hash = ?, record_hash = ? WHERE seq = ?",
+                    (prev, new_hash, row.seq))
+            prev = new_hash
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("UPDATE audit_head SET record_hash = ?", (prev,))
+        db.session.expire_all()
+        assert verify_chain() == []  # the chain alone is fooled...
+        assert verify_anchors() == ["anchor 1: event 3 no longer matches"]  # ...the anchor is not
+
+
+def test_cutting_events_off_the_end_is_caught(app):
+    from app.security.audit_security import verify_anchors, verify_chain, write_anchor
+
+    three_events(app)
+    with app.app_context():
+        write_anchor()
+    as_dba(app, "DELETE FROM audit_events WHERE seq = 3")
+    with app.app_context():
+        assert verify_chain() == ["the trail should end at event 3 but ends at event 2"]
+    # a careful attacker moves the end marker back too: the chain alone is fooled...
+    as_dba(app, "UPDATE audit_head SET seq = 2, record_hash = "
+                "(SELECT record_hash FROM audit_events WHERE seq = 2)")
+    with app.app_context():
+        assert verify_chain() == []
+        assert verify_anchors() == ["anchor 1: event 3 is gone"]  # ...the signed anchor is not
+
+
+def test_a_forged_anchor_is_rejected(app):
+    from app.security.audit_security import verify_anchors, write_anchor
+
+    three_events(app)
+    with app.app_context():
+        write_anchor()
+        path = app.config["AUDIT_ANCHOR_FILE"]
+    with open(path, encoding="utf-8") as handle:
+        anchor = json.loads(handle.readline())
+    anchor["seq"] = 2  # point the anchor somewhere else without the private key
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(anchor) + "\n")
+    with app.app_context():
+        assert verify_anchors() == ["anchor 1 has an invalid signature"]

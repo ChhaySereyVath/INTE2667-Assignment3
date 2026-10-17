@@ -22,3 +22,6 @@ CLAUDE.md
 TASKS_Ken.md
 TASKS_Ken_GUI.md
 TASKS_Ken_Round2.md
+
+# R14: signed audit anchors (kept outside the database and git)
+anchors/

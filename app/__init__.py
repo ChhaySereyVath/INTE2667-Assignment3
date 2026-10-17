@@ -13,6 +13,7 @@ jwt = JWTManager()
 
 # S13: the app refuses to start without these. There are no default values.
 REQUIRED_SECRETS = ("SECRET_KEY", "JWT_SECRET_KEY", "DATA_ENC_KEY", "BLIND_INDEX_KEY")
+REQUIRED_SECRETS += ("AUDIT_SIGNING_KEY", "ACTION_SIGNING_KEY")  # Keane: R14, R15, R19 signatures
 
 
 def create_app(test_config=None):
@@ -60,7 +61,9 @@ def create_app(test_config=None):
         BACKUP_DIR="backups",
         BACKUP_RETENTION_DAYS=90,
         RESTORE_REPORT_DIR="docs/restore-reports",
-        BACKUP_KEY=os.environ.get("BACKUP_KEY")
+        BACKUP_KEY=os.environ.get("BACKUP_KEY"),
+        # R14: signed anchors of the audit trail live OUTSIDE the database
+        AUDIT_ANCHOR_FILE="anchors/audit-anchors.jsonl",
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
