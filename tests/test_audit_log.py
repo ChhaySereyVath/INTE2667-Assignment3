@@ -52,3 +52,52 @@ def test_the_trail_starts_empty_with_its_end_marker_at_zero(app):
         head = db.session.get(AuditHead, 1)
         assert (head.seq, head.record_hash) == (0, "0" * 64)
         assert AuditEvent.query.count() == 0
+
+
+# --- KE02 ---
+
+def test_an_event_records_actor_action_target_result_and_time(app, frozen_clock):
+    from app.security.audit_security import append_event
+
+    with app.app_context():
+        alice = make_user()
+        append_event("access_denied", "denied", alice, "enrolment", "record-1")
+        db.session.commit()
+        event = AuditEvent.query.one()
+        assert event.actor_id == alice.id and event.actor_role == "citizen"
+        assert (event.action, event.target_type, event.target_id, event.result) == (
+            "access_denied", "enrolment", "record-1", "denied")
+        assert event.occurred_at == frozen_clock.now()
+
+
+def test_only_known_actions_and_results_are_accepted(app):
+    from app.security.audit_security import append_event
+
+    with app.app_context():
+        with pytest.raises(ValueError):
+            append_event("made_up_action", "success")
+        with pytest.raises(ValueError):
+            append_event("logout", "maybe")
+
+
+def test_two_events_can_never_share_a_number(app):
+    """R14: the head row hands out numbers one at a time, so the chain never forks."""
+    from app.models.audit_models import AuditHead
+
+    three_events(app)
+    with app.app_context():
+        head = db.session.get(AuditHead, 1)
+        last = AuditEvent.query.order_by(AuditEvent.seq.desc()).first()
+        assert (head.seq, head.record_hash) == (3, last.record_hash)
+
+
+def test_each_event_carries_the_hash_of_the_one_before(app):
+    three_events(app)
+    first, second, third = events(app)
+    assert (first["seq"], second["seq"], third["seq"]) == (1, 2, 3)
+    with app.app_context():
+        rows = AuditEvent.query.order_by(AuditEvent.seq).all()
+        assert rows[0].prev_hash == "0" * 64
+        assert rows[1].prev_hash == rows[0].record_hash
+        assert rows[2].prev_hash == rows[1].record_hash
+        assert len({row.record_hash for row in rows}) == 3
