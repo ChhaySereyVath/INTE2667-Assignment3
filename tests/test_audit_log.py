@@ -125,3 +125,44 @@ def test_detail_values_are_cut_short(app):
         append_event("access_denied", "denied", reason="x" * 5000)
         db.session.commit()
         assert len(json.loads(AuditEvent.query.one().details)["reason"]) == 100
+
+
+# --- KE04 ---
+
+def test_an_untouched_trail_verifies(app):
+    from app.security.audit_security import verify_chain
+
+    three_events(app)
+    with app.app_context():
+        assert verify_chain() == []
+
+
+def test_changing_an_event_is_detected(app):
+    from app.security.audit_security import verify_chain
+
+    three_events(app)
+    as_dba(app, "UPDATE audit_events SET result = 'success' WHERE seq = 2")
+    with app.app_context():
+        assert "event 2 has been altered" in verify_chain()
+
+
+def test_deleting_an_event_is_detected(app):
+    from app.security.audit_security import verify_chain
+
+    three_events(app)
+    as_dba(app, "DELETE FROM audit_events WHERE seq = 2")
+    with app.app_context():
+        problems = verify_chain()
+    assert "event 2 is missing" in problems
+    assert "event 3 does not follow the event before it" in problems
+
+
+def test_reordering_events_is_detected(app):
+    from app.security.audit_security import verify_chain
+
+    three_events(app)
+    as_dba(app, "UPDATE audit_events SET seq = 99 WHERE seq = 1",
+           "UPDATE audit_events SET seq = 1 WHERE seq = 3",
+           "UPDATE audit_events SET seq = 3 WHERE seq = 99")
+    with app.app_context():
+        assert verify_chain() != []
