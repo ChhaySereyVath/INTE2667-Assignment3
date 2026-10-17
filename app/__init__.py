@@ -129,5 +129,10 @@ def create_app(test_config=None):
         
         from app.models.enrollment_models import protect_history
         protect_history(db.engine, app.config["HISTORY_RETENTION_DAYS"])
+        
+        from app.models.audit_models import protect_audit
+        protect_audit(db.engine)
 
     return app
+
+
