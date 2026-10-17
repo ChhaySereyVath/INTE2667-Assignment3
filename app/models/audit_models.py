@@ -75,9 +75,30 @@ class AuditHead(db.Model):
     record_hash = db.Column(db.String(64), nullable=False)
 
 
+# R14, R15, R19: tables the application only ever adds rows to
+APPEND_ONLY_TABLES = ("audit_events",)
+
+
 def protect_audit(engine):
-    """R14: make sure the trail's end marker exists. (KE05 adds more to this.)"""
+    """R14/R15: the DATABASE refuses to change or delete audit and signed records.
+
+    The application never needs to, so nothing is lost. Someone with the sqlite3 tool
+    can still drop these triggers; that is what the hash chain and the signatures
+    catch (verify_chain, verify_actions).
+    """
+    statements = []
+    for table in APPEND_ONLY_TABLES:
+        statements += [
+            f"DROP TRIGGER IF EXISTS {table}_no_update",
+            f"CREATE TRIGGER {table}_no_update BEFORE UPDATE ON {table} "
+            f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END",
+            f"DROP TRIGGER IF EXISTS {table}_no_delete",
+            f"CREATE TRIGGER {table}_no_delete BEFORE DELETE ON {table} "
+            f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END",
+        ]
+    # the head row starts at "nothing yet"; OR IGNORE keeps an existing one
+    statements.append("INSERT OR IGNORE INTO audit_head (id, seq, record_hash) "
+                      f"VALUES (1, 0, '{GENESIS_HASH}')")
     with engine.begin() as connection:
-        # the head row starts at "nothing yet"; OR IGNORE keeps an existing one
-        connection.exec_driver_sql("INSERT OR IGNORE INTO audit_head (id, seq, record_hash) "
-                                   f"VALUES (1, 0, '{GENESIS_HASH}')")
+        for statement in statements:
+            connection.exec_driver_sql(statement)
