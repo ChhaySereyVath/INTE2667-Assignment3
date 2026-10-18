@@ -11,7 +11,7 @@ Usage:
 """
 import re
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 # Shared patterns: re.fullmatch is used, so the whole value must match
 NAME_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ' -]{1,100}")
@@ -129,5 +129,14 @@ def _check(value, rule):
         if "max" in rule and parsed > rule["max"]:
             return False, "is too late"
         return True, parsed
+
+    if kind == "datetime":
+        # an exact time in UTC, e.g. 2026-05-02T08:00:00 (Yufei, for polling hours)
+        if not isinstance(value, str) or len(value) > 19:
+            return False, "must be a date and time (YYYY-MM-DDTHH:MM:SS)"
+        try:
+            return True, datetime.fromisoformat(value)
+        except ValueError:
+            return False, "must be a date and time (YYYY-MM-DDTHH:MM:SS)"
 
     return False, "has an unsupported type"

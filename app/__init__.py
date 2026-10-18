@@ -106,6 +106,9 @@ def create_app(test_config=None):
     app.register_blueprint(enrollment_bp, url_prefix="/enrollment")
     app.register_blueprint(enrollment_pages_bp)
 
+    from app.routes.elections import elections_bp
+    app.register_blueprint(elections_bp)
+
     from app.routes.pages import pages_bp
     app.register_blueprint(pages_bp)
 

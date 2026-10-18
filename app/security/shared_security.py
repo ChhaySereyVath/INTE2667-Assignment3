@@ -66,6 +66,7 @@ ROLE_PERMISSIONS = {
         "enrolment:staff:register",
         "enrolment:staff:approve",
         "enrolment:history:read_sensitive",
+        "election:manage",  # Yufei: create elections, open and close polling
     }),
     "administrator": frozenset({
         "admin:user:create",

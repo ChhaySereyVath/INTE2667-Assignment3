@@ -81,3 +81,53 @@ def test_an_election_moves_one_step_at_a_time(app):
         assert change_election_status(election, actor, "polling_open")
         assert not change_election_status(election, actor, "nominations_open")  # no going back
         assert election.status == "polling_open"
+
+
+# --- Y03 ---
+
+def test_a_delegate_creates_an_election(app):
+    dana = delegate_client(app)
+    response = dana.post("/elections", headers=csrf_headers(dana), json={
+        "name": "2026 Federal Election",
+        "polling_opens_at": "2026-05-02T08:00:00", "polling_closes_at": "2026-05-02T18:00:00"})
+    assert response.status_code == 201
+    election = response.get_json()["election"]
+    assert election["status"] == "draft"
+    detail = dana.get(f"/elections/{election['id']}").get_json()["election"]
+    assert len(detail["contests"]) == 16
+
+
+def test_bad_election_details_are_refused(app):
+    dana = delegate_client(app)
+    times = {"polling_opens_at": "2026-05-02T08:00:00", "polling_closes_at": "2026-05-02T18:00:00"}
+    for body in (dict(times, name="X"),  # name too short
+                 dict(name="Late close", polling_opens_at="2026-05-02T18:00:00",
+                      polling_closes_at="2026-05-02T08:00:00"),
+                 dict(times, name="Bad date", polling_opens_at="tomorrow"),
+                 dict(times, name="Sneaky", status="polling_open")):  # unknown field
+        assert dana.post("/elections", headers=csrf_headers(dana), json=body).status_code == 400
+    with app.app_context():
+        assert Election.query.count() == 0
+
+
+def test_only_delegates_create_or_change_elections(app):
+    from tests.test_enrollment_access import citizen_client
+
+    election_id = make_election(app, status="draft")
+    alice = citizen_client(app)
+    emma = staff_client(app, "emma.vic", "aec_employee", ["VIC"])
+    for client in (alice, emma):
+        assert client.post(f"/elections/{election_id}/status", headers=csrf_headers(client),
+                           json={"status": "nominations_open"}).status_code == 403
+    assert alice.get(f"/elections/{election_id}").status_code == 200  # reading is fine
+
+
+def test_the_status_endpoint_refuses_steps_out_of_order(app):
+    election_id = make_election(app, status="draft")
+    dana = delegate_client(app)
+    bad = dana.post(f"/elections/{election_id}/status", headers=csrf_headers(dana),
+                    json={"status": "polling_open"})
+    assert bad.status_code == 409
+    good = dana.post(f"/elections/{election_id}/status", headers=csrf_headers(dana),
+                     json={"status": "nominations_open"})
+    assert good.status_code == 200 and good.get_json()["election"]["status"] == "nominations_open"
