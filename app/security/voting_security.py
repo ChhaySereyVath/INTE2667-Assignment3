@@ -82,6 +82,9 @@ def submit_ballot(user, election, contest_type, preferences, idempotency_key):
         db.session.commit()
         return decision.reason
 
+    if not preferences_are_valid(decision.entitlement.contest_id, preferences):
+        return "invalid_preferences"
+
     # R17: the WHERE status = 'unused' makes this a compare-and-swap. If two requests
     # race, the database lets exactly one of them change the row; the other changes
     # nothing (rowcount 0) and is refused.
@@ -110,3 +113,14 @@ def submit_ballot(user, election, contest_type, preferences, idempotency_key):
     append_event("ballot_accepted", "success", user, "election", election.id, contest_type=contest_type)
     db.session.commit()  # R17/R20: success is reported only after this commit
     return "accepted"
+
+
+def preferences_are_valid(contest_id, preferences):
+    """R04: a ranked list of candidates standing in THIS contest, each at most once."""
+    from app.models.election_models import Candidate
+
+    standing = {c.id for c in Candidate.query.filter_by(contest_id=contest_id, withdrawn=False)}
+    return (isinstance(preferences, list) and 0 < len(preferences) <= len(standing)
+            and all(isinstance(p, str) for p in preferences)
+            and len(set(preferences)) == len(preferences)
+            and set(preferences) <= standing)
