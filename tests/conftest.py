@@ -1,6 +1,8 @@
 """Shared pytest fixtures. Every test gets a fresh app and an empty in-memory database."""
 import secrets
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +20,10 @@ def make_test_config(**overrides):
         "BLIND_INDEX_KEY": secrets.token_hex(32),
         "BACKUP_KEY": secrets.token_hex(32),
         "WEBAUTHN_ORIGIN": "http://localhost:5000",  # tests never depend on your .env
+        "AUDIT_SIGNING_KEY": secrets.token_hex(32),
+        "ACTION_SIGNING_KEY": secrets.token_hex(32),
+        # each test writes its anchors to its own throwaway folder
+        "AUDIT_ANCHOR_FILE": str(Path(tempfile.mkdtemp()) / "audit-anchors.jsonl"),
         "SQLALCHEMY_DATABASE_URI": "sqlite://",  # in memory: nothing is written to disk
         "PREFERRED_URL_SCHEME": "https",  # the test client uses https, so Secure cookies work
     }

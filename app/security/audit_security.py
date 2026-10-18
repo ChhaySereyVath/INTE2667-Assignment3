@@ -116,3 +116,56 @@ def chain_problems(events, head):
 def verify_chain():
     """R14: check the live trail."""
     return chain_problems(AuditEvent.query.order_by(AuditEvent.seq).all(), db.session.get(AuditHead, 1))
+
+# --- signed anchors, kept outside the database --------------------------------
+
+def _anchor_file():
+    return Path(current_app.config["AUDIT_ANCHOR_FILE"])
+
+
+def write_anchor():
+    """R14: sign the current end of the chain and append it to the anchor file.
+
+    The file lives outside the database, and only the holder of AUDIT_SIGNING_KEY can
+    write a valid line, so someone who can edit the database still cannot make the
+    anchors agree with a rewritten chain. Returns the anchor, or None if no events.
+    """
+    from app.security.signing import sign
+
+    last = AuditEvent.query.order_by(AuditEvent.seq.desc()).first()
+    if last is None:
+        return None
+    anchor = {"seq": last.seq, "record_hash": last.record_hash, "anchored_at": utcnow().isoformat()}
+    anchor["signature"] = sign(anchor, "AUDIT_SIGNING_KEY")
+    path = _anchor_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(anchor) + "\n")
+    return anchor
+
+
+def verify_anchors():
+    """R14: every anchor must carry a valid signature AND still match the database."""
+    from app.security.signing import public_key_hex, verify
+
+    path = _anchor_file()
+    if not path.exists():
+        return []
+    public = public_key_hex("AUDIT_SIGNING_KEY")
+    problems = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        try:
+            anchor = json.loads(line)
+            signature = anchor.pop("signature")
+        except (ValueError, KeyError, AttributeError):
+            problems.append(f"anchor {number} is unreadable")
+            continue
+        if not verify(anchor, signature, public):
+            problems.append(f"anchor {number} has an invalid signature")
+            continue
+        event = db.session.get(AuditEvent, anchor["seq"])
+        if event is None:
+            problems.append(f"anchor {number}: event {anchor['seq']} is gone")
+        elif event.record_hash != anchor["record_hash"]:
+            problems.append(f"anchor {number}: event {anchor['seq']} no longer matches")
+    return problems
