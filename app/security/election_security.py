@@ -30,3 +30,40 @@ def change_election_status(election, actor, new_status):
         return False
     previous, election.status = election.status, new_status
     return True
+
+
+# --- demo data --------------------------------------------------------------
+
+DEMO_CANDIDATES = {
+    "house": [("Avery Lin", "Harbour Party"), ("Blake Okafor", "Green Valley Party"),
+              ("Casey Nguyen", "Independent"), ("Dana Russo", "Civic Union")],
+    "senate": [("Ellis Park", "Harbour Party"), ("Finley Shaw", "Harbour Party"),
+               ("Gray Molina", "Green Valley Party"), ("Harper Doyle", "Green Valley Party"),
+               ("Indy Tran", "Civic Union"), ("Jules Becker", "Civic Union"),
+               ("Kai Moreno", "Independent"), ("Lane Fraser", "Independent")],
+}
+
+
+@click.command("seed-election")
+@click.option("--creator", required=True, help="Username of the delegate creating it")
+@with_appcontext
+def seed_election_command(creator):
+    """Create a demo election open for nominations, with invented candidates.
+
+    These are fictional names for a demonstration. In use, delegates add candidates
+    through the candidate API, which signs every change (Keane's R15).
+    """
+    from app.models.user import User
+
+    actor = User.query.filter_by(username=creator).first()
+    if actor is None or actor.role != "commissioner_delegate":
+        raise click.ClickException("--creator must be an existing commissioner delegate")
+    now = utcnow().replace(microsecond=0)
+    election = create_election(actor, "Demo Federal Election", now, now + timedelta(days=14))
+    election.status = "nominations_open"
+    for contest in election.contests:
+        for position, (name, party) in enumerate(DEMO_CANDIDATES[contest.contest_type], start=1):
+            db.session.add(Candidate(contest_id=contest.id, name=name, party=party,
+                                     ballot_position=position))
+    db.session.commit()
+    click.echo(f"Created election {election.id} with {len(election.contests)} contests.")
