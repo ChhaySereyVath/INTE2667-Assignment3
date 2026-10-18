@@ -67,3 +67,32 @@ def test_registration_and_recovery_are_limited(limited_app):
     recover = [client.post("/auth/recovery/request", json={"username": "x", "email": "x@example.com"}).status_code
                for _ in range(4)]
     assert recover == [202] * 3 + [429]
+
+
+# --- Y07 ---
+
+def test_parallel_password_guesses_are_all_counted(tmp_path):
+    """R06/R09: a script firing guesses in parallel must still hit the lock. Before
+    this fix, simultaneous failures could crash (two rows) or overwrite each other's
+    count, so 12 parallel guesses could count as 1."""
+    import threading
+
+    app = create_app(make_test_config(SQLALCHEMY_DATABASE_URI=f"sqlite:///{tmp_path / 'guess.db'}"))
+    with app.app_context():
+        make_user()
+    statuses = []
+
+    def guess():
+        client = app.test_client()
+        response = client.post("/auth/login", json={"username": "alice", "password": "wrong-password-1"})
+        statuses.append(response.status_code)
+
+    threads = [threading.Thread(target=guess) for _ in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert 500 not in statuses
+    assert login(app.test_client(), "alice", "Correct-Horse-42").status_code == 429  # locked
+    with app.app_context():
+        db.engine.dispose()
