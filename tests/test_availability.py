@@ -136,3 +136,18 @@ def test_the_load_test_summary_counts_429_as_not_an_error():
     report = summarise([("page", 200, 10.0)] * 90 + [("login", 429, 1.0)] * 9 + [("page", 500, 50.0)])
     assert report["rate_limited"] == 9
     assert report["error_rate"] == 0.01
+
+
+# --- Y16 ---
+
+def test_ballots_are_limited_per_voter(limited_app):
+    """Five tries a minute is plenty for a real voter, and stops a script hammering."""
+    with limited_app.app_context():
+        make_user()
+    client = limited_app.test_client()
+    login(client, "alice", "Correct-Horse-42")
+    body = {"election_id": str(uuid.uuid4()), "contest_type": "house", "preferences": ["x"]}
+    statuses = [client.post("/voting/ballots", json=body,
+                            headers=dict(csrf_headers(client), **{"Idempotency-Key": str(uuid.uuid4())})).status_code
+                for _ in range(6)]
+    assert statuses == [404] * 5 + [429]

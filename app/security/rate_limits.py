@@ -32,6 +32,8 @@ ROUTE_LIMITS = {
     "auth.activate": ("10 per minute", get_remote_address),
     "recovery.request_recovery": ("3 per minute", get_remote_address),
     "recovery.confirm_recovery": ("5 per minute", get_remote_address),
+    "voting.eligibility": ("20 per minute", rate_key),
+    "voting.cast_ballot": ("5 per minute", rate_key),
 }
 
 

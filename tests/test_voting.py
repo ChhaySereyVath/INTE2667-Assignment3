@@ -318,3 +318,29 @@ def test_twenty_simultaneous_submissions_create_exactly_one_ballot(tmp_path):
         assert VoteEntitlement.query.filter_by(status="used").count() == 1
         db.session.remove()
         db.engine.dispose()
+
+
+# --- Y16 ---
+
+def test_invalid_preferences_are_refused_and_nothing_is_used_up(app):
+    election_id, (alice,) = polling_election(app, "alice")
+    contest_id = contest_of(app, election_id, "house")
+    standing = candidate_ids(app, contest_id)
+    senate = candidate_ids(app, contest_of(app, election_id, "senate"))
+    try:
+        for preferences in ([], [standing[0], standing[0]], [str(uuid.uuid4())], [senate[0]],
+                            [1, 2], "not a list"):
+            response = vote(alice, app, election_id, preferences=preferences)
+            assert response.status_code == 400, preferences
+        with app.app_context():
+            assert VoteEntitlement.query.filter_by(status="used").count() == 0
+        assert vote(alice, app, election_id, preferences=standing[:1]).status_code == 201
+    finally:
+        clock.unfreeze()
+
+
+def test_an_ineligible_voter_is_refused_with_a_reason(app):
+    election_id = make_election(app)
+    alice = approved_voter(app, "alice")
+    response = vote(alice, app, election_id)
+    assert response.status_code == 403 and response.get_json()["reason"] == "polling_not_open"
