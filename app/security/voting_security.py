@@ -39,3 +39,11 @@ def check_eligibility(user, election, contest_type):
     if entitlement.status == "used":
         return Decision(False, "already_voted", entitlement)
     return Decision(True, "eligible", entitlement)
+
+
+def record_decision(user, election, contest_type, decision):
+    """R16: 'Eligibility decisions are recorded for investigation.'"""
+    from app.security.audit_security import append_event
+
+    append_event("eligibility_decision", "success" if decision.eligible else "denied", user,
+                 "election", election.id, contest_type=contest_type, reason=decision.reason)

@@ -117,6 +117,9 @@ def create_app(test_config=None):
     from app.routes.elections import elections_bp
     app.register_blueprint(elections_bp)
 
+    from app.routes.voting import voting_bp
+    app.register_blueprint(voting_bp)
+
     from app.routes.pages import pages_bp
     app.register_blueprint(pages_bp)
 

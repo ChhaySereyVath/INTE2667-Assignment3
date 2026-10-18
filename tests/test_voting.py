@@ -144,3 +144,35 @@ def test_each_rule_gives_its_own_reason(app):
             assert check_eligibility(person["alice"], election, "house").reason == "polling_not_open"
         finally:
             clock.unfreeze()
+
+
+# --- Y11 ---
+
+def test_the_eligibility_endpoint_answers_and_records_the_decision(app):
+    from app.models.audit_models import AuditEvent
+
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        body = check(alice, election_id).get_json()
+        assert body["eligible"] is True and body["reason"] == "eligible"
+        with app.app_context():
+            event = AuditEvent.query.filter_by(action="eligibility_decision").one()
+            assert json.loads(event.details) == {"contest_type": "house", "reason": "eligible"}
+    finally:
+        clock.unfreeze()
+
+
+def test_a_client_cannot_declare_itself_eligible(app):
+    """R16: 'A client-supplied eligibility flag is not trusted.'"""
+    election_id = make_election(app)  # polling not even open
+    alice = approved_voter(app, "alice")
+    assert check(alice, election_id, eligible=True).status_code == 400
+    assert check(alice, election_id).get_json()["eligible"] is False
+
+
+def test_staff_cannot_use_the_voter_endpoints(app):
+    from tests.test_elections import delegate_client
+
+    election_id = make_election(app)
+    dana = delegate_client(app)
+    assert check(dana, election_id).status_code == 403

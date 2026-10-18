@@ -36,6 +36,10 @@ def change_election_status(election, actor, new_status):
     previous, election.status = election.status, new_status
     if new_status == "polling_open":
         issue_entitlements(election)
+    from app.security.audit_security import append_event
+
+    append_event("election_transition", "success", actor, "election", election.id,
+                 from_status=previous, to_status=new_status)
     return True
 
 
