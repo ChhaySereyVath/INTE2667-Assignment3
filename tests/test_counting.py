@@ -32,3 +32,32 @@ def test_exhausted_ballots_drop_out_of_the_count():
     result = count_house(ballots, [A, B, C], seed="x")
     assert result["elected"] == [A]
     assert sum(result["rounds"][-1].values()) < 7  # some ballots exhausted
+
+
+# --- Y19 ---
+
+def test_the_senate_elects_the_highest_first_preferences():
+    from app.security.counting import count_senate
+
+    ballots = [[A]] * 5 + [[B]] * 4 + [[C]] * 2 + [[D]] * 1
+    assert count_senate(ballots, [A, B, C, D], seats=2)["elected"] == [A, B]
+
+
+def test_an_excluded_candidate_passes_their_votes_on():
+    """R15 recount exclusion: D's ballots count for their next preference."""
+    ballots = [[A]] * 3 + [[B]] * 2 + [[D, B]] * 2
+    assert count_house(ballots, [A, B, D])["rounds"][0][D] == 2
+    result = count_house(ballots, [A, B, D], excluded=[D])
+    assert D not in result["rounds"][0]
+    assert result["elected"] == [B]  # B 4, A 3
+
+
+def test_ties_are_settled_by_a_lot_that_is_the_same_every_time():
+    from app.security.counting import count_senate
+
+    ballots = [[A], [B]]
+    first = count_senate(ballots, [A, B], seats=1, seed="contest-7")
+    again = count_senate(ballots, [A, B], seats=1, seed="contest-7")
+    assert first["elected"] == again["elected"]  # a recount gives the same result
+    assert first["lot_order"] == lot_order([A, B], "contest-7")
+    assert first["elected"] == [first["lot_order"][0]]

@@ -47,3 +47,12 @@ def count_house(ballots, candidates, excluded=(), seed=""):
             return {"elected": [ranked[0]], "rounds": rounds, "lot_order": order}
         continuing.discard(ranked[-1])  # exclude the lowest (on a tie, the latest in the lot)
     return {"elected": [], "rounds": rounds, "lot_order": order}
+
+
+def count_senate(ballots, candidates, seats, excluded=(), seed=""):
+    """First-preference count; the `seats` highest are elected."""
+    order = lot_order(candidates, seed)
+    continuing = set(candidates) - set(excluded)
+    tally = first_choices(ballots, continuing)
+    ranked = sorted(continuing, key=lambda c: (-tally[c], order.index(c)))
+    return {"elected": ranked[:seats], "rounds": [dict(tally)], "lot_order": order}
