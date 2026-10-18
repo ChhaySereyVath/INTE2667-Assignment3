@@ -98,8 +98,11 @@ def newest_backup(directory):
 
 def verify_backup(path, report_dir):
     """R07: a restore test with a written result. Returns the report's path."""
+    from app.security.election_backup import election_problems
+
     restored = read_backup(path)
     counts = table_counts(restored)
+    problems = election_problems(restored)  # Yufei: ballots and the audit trail (R07, R20)
     restored.close()
     report_dir = Path(report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -109,10 +112,24 @@ def verify_backup(path, report_dir):
              f"- Backup: `{Path(path).name}`",
              "- Decrypted with BACKUP_KEY: yes",
              "- SQLite integrity check: ok",
-             "- Result: **PASS**", "", "| Table | Rows |", "|---|---|"]
+             f"- Ballots match voters marked as voted, audit trail verifies: "
+             f"{'yes' if not problems else 'NO'}",
+             f"- Result: **{'PASS' if not problems else 'FAIL'}**", ""]
+    lines += [f"- Problem: {problem}" for problem in problems]
+    lines += ["", "| Table | Rows |", "|---|---|"]
     lines += [f"| {name} | {count} |" for name, count in counts.items()]
     report.write_text("\n".join(lines) + "\n")
+    if problems:
+        raise RestoreCheckFailed(report)
     return report
+
+
+class RestoreCheckFailed(Exception):
+    """The backup restored, but the election data in it does not add up."""
+
+    def __init__(self, report):
+        super().__init__(f"Restore test FAILED: see {report}")
+        self.report = report
 
 
 @click.command("backup")
@@ -137,6 +154,8 @@ def verify_backup_command(backup_file):
         report = verify_backup(path, current_app.config["RESTORE_REPORT_DIR"])
     except ValueError:
         raise click.ClickException("Restore test FAILED: the backup could not be decrypted or is damaged.")
+    except RestoreCheckFailed as failure:
+        raise click.ClickException(str(failure))
     click.echo(f"Restore test passed. Report: {report}")
 
 
