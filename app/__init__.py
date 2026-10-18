@@ -60,7 +60,9 @@ def create_app(test_config=None):
         BACKUP_DIR="backups",
         BACKUP_RETENTION_DAYS=90,
         RESTORE_REPORT_DIR="docs/restore-reports",
-        BACKUP_KEY=os.environ.get("BACKUP_KEY")
+        BACKUP_KEY=os.environ.get("BACKUP_KEY"),
+        # R06: Flask-Limiter reads this. Tests switch it off unless they test R06.
+        RATELIMIT_ENABLED=True,
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
@@ -114,6 +116,9 @@ def create_app(test_config=None):
 
     from app.routes.pages import pages_bp
     app.register_blueprint(pages_bp)
+
+    from app.security.rate_limits import install_rate_limits
+    install_rate_limits(app)
 
     with app.app_context():
         from app import models
