@@ -344,3 +344,48 @@ def test_an_ineligible_voter_is_refused_with_a_reason(app):
     alice = approved_voter(app, "alice")
     response = vote(alice, app, election_id)
     assert response.status_code == 403 and response.get_json()["reason"] == "polling_not_open"
+
+
+# --- Y17 ---
+
+def test_ballots_are_stored_without_a_hidden_arrival_order(app):
+    """R18: SQLite's hidden rowid would record arrival order; the table has none."""
+    with app.app_context(), db.engine.connect() as connection:
+        sql = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE name = 'ballots'").scalar()
+    assert "WITHOUT ROWID" in sql
+
+
+def test_nothing_links_a_voter_to_their_ballot(app):
+    """R18: 'Tests confirm that no common correlation token links the voter to the ballot.'"""
+    from app.models.voting_models import Ballot
+    from app.models.audit_models import AuditEvent
+    from app.models.auth_models import UserSession
+    from app.models.user import User
+
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        response = vote(alice, app, election_id)
+    finally:
+        clock.unfreeze()
+    with app.app_context():
+        ballot = Ballot.query.one()
+        user = User.query.filter_by(username="alice").one()
+        voter_values = {user.id, user.username}
+        voter_values |= {s.id for s in UserSession.query.filter_by(user_id=user.id)}
+        voter_values |= {str(e.id) for e in VoteEntitlement.query.filter_by(user_id=user.id)}
+        voter_values |= {e.idempotency_key_hash for e in VoteEntitlement.query.filter_by(user_id=user.id)}
+        ballot_values = {ballot.id, ballot.preferences_enc, ballot.signature}
+        assert not (voter_values & ballot_values) - {None}
+        # the trail records that alice voted, but not which ballot is hers
+        trail = json.dumps([e.to_dict() for e in AuditEvent.query.all()])
+        assert ballot.id not in trail
+        entitlement = VoteEntitlement.query.filter_by(user_id=user.id, status="used").one()
+        assert entitlement.used_on.isoformat() == "2026-05-02"  # a date, never a time
+    assert ballot.id not in response.get_data(as_text=True)  # no receipt to sell or coerce
+
+
+def test_no_endpoint_hands_out_ballots(app):
+    for rule in app.url_map.iter_rules():
+        if "ballot" in rule.rule:
+            assert rule.methods & {"GET"} == set(), rule.rule
