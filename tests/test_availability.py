@@ -151,3 +151,12 @@ def test_ballots_are_limited_per_voter(limited_app):
                             headers=dict(csrf_headers(client), **{"Idempotency-Key": str(uuid.uuid4())})).status_code
                 for _ in range(6)]
     assert statuses == [404] * 5 + [429]
+
+
+# --- Y26 ---
+
+def test_the_page_script_explains_a_429():
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parent.parent / "app" / "static" / "js" / "api.js").read_text()
+    assert "429" in script and "Retry-After" in script
