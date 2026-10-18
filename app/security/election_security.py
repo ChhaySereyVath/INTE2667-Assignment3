@@ -22,3 +22,11 @@ def create_election(actor, name, polling_opens_at, polling_closes_at):
         db.session.add(Contest(election_id=election.id, contest_type="senate", state=state,
                                seats=SENATE_SEATS[state]))
     return election
+
+
+def change_election_status(election, actor, new_status):
+    """Move an election along its workflow. Returns True if the move was allowed."""
+    if new_status not in ELECTION_TRANSITIONS.get(election.status, ()):
+        return False
+    previous, election.status = election.status, new_status
+    return True
