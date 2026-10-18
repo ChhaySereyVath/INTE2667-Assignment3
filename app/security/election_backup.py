@@ -41,5 +41,18 @@ def ballot_problems(connection):
     return problems
 
 
+def audit_problems(connection):
+    """Run Keane's chain check over the restored copy's audit trail."""
+    from app.security.audit_security import chain_problems
+
+    if "audit_events" not in _tables(connection):
+        return []
+    events = _rows(connection, "SELECT * FROM audit_events ORDER BY seq")
+    for event in events:
+        event.occurred_at = datetime.fromisoformat(event.occurred_at)
+    heads = _rows(connection, "SELECT seq, record_hash FROM audit_head WHERE id = 1")
+    return chain_problems(events, heads[0] if heads else None)
+
+
 def election_problems(connection):
-    return ballot_problems(connection)
+    return ballot_problems(connection) + audit_problems(connection)

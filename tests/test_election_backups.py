@@ -49,3 +49,19 @@ def test_a_backup_with_a_missing_ballot_fails_its_restore_test(app, tmp_path):
             verify_backup(backup, tmp_path / "reports")
     text = failure.value.report.read_text()
     assert "**FAIL**" in text and "voters marked as voted" in text
+
+
+# --- Y23 ---
+
+def test_the_restore_test_rechecks_the_audit_trail(app, tmp_path):
+    import pytest
+
+    voted_app(app, tmp_path)
+    with app.app_context():
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("DROP TRIGGER audit_events_no_update")
+            connection.exec_driver_sql("UPDATE audit_events SET result = 'failure' WHERE seq = 2")
+        backup = create_backup(tmp_path / "backups")
+        with pytest.raises(RestoreCheckFailed) as failure:
+            verify_backup(backup, tmp_path / "reports")
+    assert "event 2 has been altered" in failure.value.report.read_text()
