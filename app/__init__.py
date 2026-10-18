@@ -98,6 +98,9 @@ def create_app(test_config=None):
     app.cli.add_command(verify_backup_command)
     app.cli.add_command(restore_command)
 
+    from app.security.election_backup import restore_status_command
+    app.cli.add_command(restore_status_command)
+
     from app.security.enrollment_security import purge_history_command
     app.cli.add_command(purge_history_command)
 
