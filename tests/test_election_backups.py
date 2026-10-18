@@ -116,6 +116,31 @@ def test_after_a_crash_the_restored_system_keeps_every_vote_and_counts_none_twic
         db.engine.dispose()
 
 
+# --- Y27 ---
+
+def test_demo_voters_and_demo_votes_go_through_the_normal_rules(app):
+    from app.models.election_models import Election
+    from app.security.election_security import change_election_status
+    from tests.test_auth_login import make_user
+
+    runner = app.test_cli_runner()
+    with app.app_context():
+        make_user(username="dana", role="commissioner_delegate")
+    runner.invoke(args=["seed-election", "--creator", "dana"])
+    assert "Created 5 demo voters in VIC." in runner.invoke(args=["demo-voters", "--count", "5"]).output
+    with app.app_context():
+        election = Election.query.one()
+        from app.models.user import User
+
+        assert change_election_status(election, User.query.filter_by(username="dana").one(), "polling_open")
+        db.session.commit()
+        election_id = election.id
+    output = runner.invoke(args=["demo-votes", "--election", election_id]).output
+    assert "{'accepted': 10}" in output
+    again = runner.invoke(args=["demo-votes", "--election", election_id]).output
+    assert "{'already_voted': 10}" in again  # running it twice cannot double the votes
+
+
 # --- Y25 ---
 
 def test_restore_status_flags_an_overdue_restore_test(app, tmp_path):
