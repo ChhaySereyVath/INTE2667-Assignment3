@@ -36,6 +36,10 @@ class Ballot(db.Model):
 
     - The id is random, so it says nothing about who or when.
     - There is no timestamp and no sequence number.
+    - WITHOUT ROWID: SQLite normally keeps a hidden counting row id, which would
+      record the order ballots arrived in. Without it, rows are stored in order of
+      their random id, so arrival order is lost (it could otherwise be matched against
+      the order of login events in the audit trail).
     """
 
     __tablename__ = "ballots"
@@ -47,3 +51,5 @@ class Ballot(db.Model):
     preferences_enc = db.Column(db.Text, nullable=False)
     # R19: filled in by Keane's integrity code; lets anyone detect an altered ballot
     signature = db.Column(db.String(128))
+
+    __table_args__ = {"sqlite_with_rowid": False}
