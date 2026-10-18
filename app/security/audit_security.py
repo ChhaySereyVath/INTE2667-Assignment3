@@ -61,7 +61,7 @@ def append_event(action, result, actor=None, target_type=None, target_id=None, *
         target_type=target_type,
         target_id=str(target_id) if target_id is not None else None,
         result=result,
-        details=canonical_json(details),
+        details=canonical_json(clean_details(details)),
         prev_hash=prev_hash,
     )
     event.record_hash = compute_hash(event.prev_hash, event)
@@ -69,3 +69,26 @@ def append_event(action, result, actor=None, target_type=None, target_id=None, *
     db.session.add(event)
     db.session.flush()  # the next append in this request sees this one
     return event
+
+# R13: the only detail keys an event may carry. Anything else is dropped before it is
+# stored, so a password, token, key or ballot choice can never end up in the trail,
+# even if a caller passes one by mistake.
+ALLOWED_DETAILS = frozenset({
+    "reason", "permission", "state", "role", "previous_role", "new_role", "field",
+    "decision", "status", "from_status", "to_status", "election_id", "contest_id",
+    "contest_type", "count", "problems", "outcome",
+})
+MAX_DETAIL_LENGTH = 100
+
+
+def clean_details(details):
+    """Keep allowlisted keys with short, simple values only."""
+    cleaned = {}
+    for key, value in details.items():
+        if key not in ALLOWED_DETAILS:
+            continue
+        if value is None or isinstance(value, (bool, int)):
+            cleaned[key] = value
+        else:
+            cleaned[key] = str(value)[:MAX_DETAIL_LENGTH]
+    return cleaned
