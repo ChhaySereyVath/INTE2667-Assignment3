@@ -273,3 +273,48 @@ def test_a_ballot_needs_an_idempotency_key(app):
         assert response.status_code == 400
     finally:
         clock.unfreeze()
+
+
+# --- Y15 ---
+
+def test_twenty_simultaneous_submissions_create_exactly_one_ballot(tmp_path):
+    """R17: 'Concurrent requests cannot create two accepted records.'
+
+    Uses a real database FILE, so twenty threads really do compete for it.
+    """
+    import threading
+
+    from app import create_app
+    from tests.conftest import make_test_config
+
+    app = create_app(make_test_config(SQLALCHEMY_DATABASE_URI=f"sqlite:///{tmp_path / 'race.db'}"))
+    election_id, (alice,) = polling_election(app, "alice")
+    contest_id = contest_of(app, election_id, "house")
+    preferences = candidate_ids(app, contest_id)
+    cookies = {name: alice.get_cookie(name).value for name in ("access_token_cookie", "csrf_access_token")}
+    results = []
+
+    def submit():
+        client = app.test_client()
+        for name, value in cookies.items():
+            client.set_cookie(name, value)
+        response = client.post("/voting/ballots", json={
+            "election_id": election_id, "contest_type": "house", "preferences": preferences},
+            headers={"X-CSRF-TOKEN": cookies["csrf_access_token"], "Origin": "https://localhost",
+                     "Idempotency-Key": str(uuid.uuid4())})
+        results.append(response.status_code)
+
+    try:
+        threads = [threading.Thread(target=submit) for _ in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        clock.unfreeze()
+    assert results.count(201) == 1
+    assert ballots(app) == 1
+    with app.app_context():
+        assert VoteEntitlement.query.filter_by(status="used").count() == 1
+        db.session.remove()
+        db.engine.dispose()
