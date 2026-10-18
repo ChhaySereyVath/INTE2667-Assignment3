@@ -57,6 +57,7 @@ ROLE_PERMISSIONS = {
         "enrolment:self:enrol",
         "enrolment:self:update_address",
         "eligibility:self:check",  # Yufei: R16
+        "ballot:submit",  # Yufei: R17
     }),
     "aec_employee": frozenset({
         "enrolment:staff:read",

@@ -188,3 +188,62 @@ def test_a_ballot_row_has_nothing_that_identifies_the_voter(app):
     assert columns == {"id", "election_id", "contest_id", "preferences_enc", "signature"}
     for word in ("user", "voter", "session", "ip", "time", "seq", "created", "key"):
         assert not any(word in column for column in columns), word
+
+
+# --- Y13 ---
+
+def test_a_voter_casts_one_ballot_per_contest(app):
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        first = vote(alice, app, election_id)
+        assert first.status_code == 201
+        assert first.get_json() == {"status": "accepted", "contest_type": "house"}
+        second = vote(alice, app, election_id)
+        assert second.status_code == 409  # R17: a second ballot is refused
+        assert ballots(app) == 1
+        # R17: 'A House ballot does not prevent the voter from submitting a separate Senate ballot.'
+        assert vote(alice, app, election_id, "senate").status_code == 201
+        assert ballots(app) == 2
+    finally:
+        clock.unfreeze()
+
+
+def test_the_ballot_and_the_used_entitlement_are_saved_together(app):
+    """R17: 'The accepted-vote state and used entitlement are updated atomically.'"""
+    from app.models.voting_models import Ballot
+    import pytest
+
+    from app.security import voting_security
+
+    election_id, (alice,) = polling_election(app, "alice")
+    original = voting_security.encrypt_field
+
+    def broken_encrypt(*args, **kwargs):
+        raise RuntimeError("simulated crash between the two writes")
+
+    voting_security.encrypt_field = broken_encrypt
+    try:
+        assert vote(alice, app, election_id).status_code == 500
+    finally:
+        voting_security.encrypt_field = original
+    try:
+        with app.app_context():
+            assert Ballot.query.count() == 0
+            assert VoteEntitlement.query.filter_by(status="used").count() == 0  # rolled back too
+        assert vote(alice, app, election_id).status_code == 201  # and they can still vote
+    finally:
+        clock.unfreeze()
+
+
+def test_preferences_are_encrypted(app):
+    from app.models.voting_models import Ballot
+
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        vote(alice, app, election_id)
+        with app.app_context():
+            ballot = Ballot.query.one()
+            for candidate in candidate_ids(app, ballot.contest_id):
+                assert candidate not in ballot.preferences_enc
+    finally:
+        clock.unfreeze()

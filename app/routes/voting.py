@@ -56,3 +56,39 @@ def eligibility(current_user):
     db.session.commit()
     return jsonify({"eligible": decision.eligible, "reason": decision.reason,
                     "message": REFUSALS.get(decision.reason, "You may vote in this contest.")}), 200
+
+
+BALLOT_SCHEMA = dict(ELIGIBILITY_SCHEMA, preferences={"type": list, "required": True, "max": 100})
+
+
+@voting_bp.route("/voting/ballots", methods=["POST"])
+@permission_required("ballot:submit")
+def cast_ballot(current_user):
+    """R16-R18: cast one ballot. Needs an Idempotency-Key header (a random UUID made by
+    the terminal), so a retry after a lost response cannot vote twice."""
+    from app.security.voting_security import submit_ballot
+
+    try:
+        idempotency_key = str(uuid.UUID(request.headers.get("Idempotency-Key", "")))
+    except ValueError:
+        return jsonify({"error": "Invalid request",
+                        "fields": {"Idempotency-Key": "must be a UUID header"}}), 400
+    ok, data, errors = validate(request.get_json(silent=True), BALLOT_SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request", "fields": errors}), 400
+    election, missing = _election_or_404(data["election_id"])
+    if missing:
+        return missing
+
+    outcome = submit_ballot(current_user, election, data["contest_type"], data["preferences"],
+                            idempotency_key)
+    # R18: the answer confirms the contest only: no ballot id, no copy of the choices
+    if outcome == "accepted":
+        return jsonify({"status": "accepted", "contest_type": data["contest_type"]}), 201
+    if outcome == "already_accepted":
+        return jsonify({"status": "already_accepted", "contest_type": data["contest_type"]}), 200
+    if outcome == "invalid_preferences":
+        return jsonify({"error": REFUSALS[outcome]}), 400
+    if outcome == "already_voted":
+        return jsonify({"error": REFUSALS[outcome]}), 409
+    return jsonify({"error": REFUSALS[outcome], "reason": outcome}), 403
