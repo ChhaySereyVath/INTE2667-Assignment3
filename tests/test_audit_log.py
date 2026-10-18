@@ -296,3 +296,60 @@ def test_the_audit_commands_anchor_and_verify(app):
     as_dba(app, "DELETE FROM audit_events WHERE seq = 2")
     result = runner.invoke(args=["audit-verify"])
     assert result.exit_code == 1 and "FAIL" in result.output
+
+# --- KE10 ---
+
+def actions(app):
+    return [event["action"] for event in events(app)]
+
+
+def test_logins_logouts_and_lockouts_are_recorded(app, client):
+    with app.app_context():
+        alice_id = make_user().id
+    login(client, "alice", "wrong-password-1")
+    login(client, "nobody-here", "Correct-Horse-42")
+    login(client, "alice", "Correct-Horse-42")
+    client.post("/auth/logout", headers=csrf_headers(client))
+    recorded = events(app)
+    assert [e["action"] for e in recorded] == ["login_failed", "login_failed", "login_success", "logout"]
+    assert recorded[0]["actor_id"] == alice_id
+    assert recorded[1]["actor_id"] is None  # the unknown username itself is not stored
+    assert "nobody-here" not in json.dumps(recorded)
+
+
+def test_logins_at_the_same_moment_keep_one_chain(tmp_path):
+    """R14: twenty failed logins at the same instant still make one unbroken chain,
+    because the head row hands out one number at a time. Uses a database FILE so the
+    threads really do run at once."""
+    import threading
+
+    from app import create_app
+    from app.security.audit_security import verify_chain
+    from tests.conftest import make_test_config
+
+    app = create_app(make_test_config(SQLALCHEMY_DATABASE_URI=f"sqlite:///{tmp_path / 'chain.db'}"))
+    statuses = []
+
+    def attempt(number):
+        response = app.test_client().post("/auth/login", json={"username": f"user{number}",
+                                                                "password": "wrong-password-1"})
+        statuses.append(response.status_code)
+
+    threads = [threading.Thread(target=attempt, args=(number,)) for number in range(20)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert statuses == [401] * 20
+    with app.app_context():
+        assert AuditEvent.query.count() == 20
+        assert verify_chain() == []
+        db.engine.dispose()
+
+
+def test_a_locked_login_is_recorded(app, client):
+    with app.app_context():
+        make_user()
+    for _ in range(app.config["LOGIN_MAX_FAILURES_PER_IP"] + 1):
+        login(client, "alice", "wrong-password-1")
+    assert actions(app)[-1] == "login_locked"
