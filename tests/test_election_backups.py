@@ -114,3 +114,24 @@ def test_after_a_crash_the_restored_system_keeps_every_vote_and_counts_none_twic
     with again.app_context():
         assert Ballot.query.count() == 2
         db.engine.dispose()
+
+
+# --- Y25 ---
+
+def test_restore_status_flags_an_overdue_restore_test(app, tmp_path):
+    app.config["RESTORE_REPORT_DIR"] = str(tmp_path / "reports")
+    runner = app.test_cli_runner()
+    result = runner.invoke(args=["restore-status"])
+    assert result.exit_code == 1 and "no restore test has ever been run" in result.output
+
+    with app.app_context():
+        clock.freeze(datetime(2026, 3, 1, 9, 0, 0))
+        try:
+            verify_backup(create_backup(tmp_path / "backups"), tmp_path / "reports")
+            clock.freeze(datetime(2026, 3, 20, 9, 0, 0))
+            assert runner.invoke(args=["restore-status"]).exit_code == 0  # 19 days: fine
+            clock.freeze(datetime(2026, 4, 10, 9, 0, 0))
+            late = runner.invoke(args=["restore-status"])
+            assert late.exit_code == 1 and "OVERDUE" in late.output  # 40 days: overdue
+        finally:
+            clock.unfreeze()

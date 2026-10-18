@@ -56,3 +56,39 @@ def audit_problems(connection):
 
 def election_problems(connection):
     return ballot_problems(connection) + audit_problems(connection)
+
+
+# --- is the monthly restore test up to date? ----------------------------------
+
+RESTORE_TEST_EVERY_DAYS = 31
+
+
+def latest_restore_report(report_dir):
+    """The newest restore report and when it was written, or (None, None)."""
+    from pathlib import Path
+
+    reports = sorted(Path(report_dir).glob("restore-*.md"))
+    if not reports:
+        return None, None
+    tested = datetime.strptime(reports[-1].stem, "restore-%Y%m%d-%H%M%S")
+    return reports[-1], tested
+
+
+@click.command("restore-status")
+@with_appcontext
+def restore_status_command():
+    """R07: fail (exit code 1) if the last restore test is over a month old or failed.
+    Schedule it, so an overdue restore test is noticed rather than forgotten."""
+    from app.security.shared_security import utcnow
+
+    report, tested = latest_restore_report(current_app.config["RESTORE_REPORT_DIR"])
+    if report is None:
+        click.echo("OVERDUE: no restore test has ever been run. Run `flask verify-backup`.")
+        raise SystemExit(1)
+    age = (utcnow() - tested).days
+    passed = "**PASS**" in report.read_text()
+    click.echo(f"Last restore test: {tested:%Y-%m-%d} ({age} days ago), "
+               f"{'PASS' if passed else 'FAIL'}. Report: {report}")
+    if age > RESTORE_TEST_EVERY_DAYS or not passed:
+        click.echo("OVERDUE or FAILED: run `flask verify-backup` now.")
+        raise SystemExit(1)
