@@ -13,6 +13,7 @@ jwt = JWTManager()
 
 # S13: the app refuses to start without these. There are no default values.
 REQUIRED_SECRETS = ("SECRET_KEY", "JWT_SECRET_KEY", "DATA_ENC_KEY", "BLIND_INDEX_KEY")
+REQUIRED_SECRETS += ("BALLOT_KEY",)  # Yufei: R01 encryption of ballot preferences
 
 
 def create_app(test_config=None):

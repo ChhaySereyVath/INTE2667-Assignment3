@@ -47,3 +47,64 @@ def record_decision(user, election, contest_type, decision):
 
     append_event("eligibility_decision", "success" if decision.eligible else "denied", user,
                  "election", election.id, contest_type=contest_type, reason=decision.reason)
+
+
+# --- casting a ballot ---------------------------------------------------------
+
+def ballot_aad(ballot_id, contest_id):
+    """R01/R19: binds the encrypted preferences to ONE ballot in ONE contest, so a
+    ciphertext copied onto another ballot row will not decrypt."""
+    return f"ballots:preferences:{ballot_id}:{contest_id}"
+
+
+def read_preferences(ballot):
+    """Decrypt a ballot's preferences (counting only)."""
+    return json.loads(decrypt_field(ballot.preferences_enc, ballot_aad(ballot.id, ballot.contest_id),
+                                    key_name="BALLOT_KEY"))
+
+
+def _key_hash(user, idempotency_key):
+    return hashlib.sha256(f"{user.id}:{idempotency_key}".encode("utf-8")).hexdigest()
+
+
+def submit_ballot(user, election, contest_type, preferences, idempotency_key):
+    """R17: use the entitlement and store the ballot in ONE transaction.
+
+    Returns "accepted", "already_accepted" (a retry of the same submission), or the
+    reason it was refused.
+    """
+    decision = check_eligibility(user, election, contest_type)
+    key_hash = _key_hash(user, idempotency_key)
+    if not decision.eligible:
+        record_decision(user, election, contest_type, decision)
+        db.session.commit()
+        return decision.reason
+
+    # R17: the WHERE status = 'unused' makes this a compare-and-swap. If two requests
+    # race, the database lets exactly one of them change the row; the other changes
+    # nothing (rowcount 0) and is refused.
+    used = db.session.execute(
+        update(VoteEntitlement)
+        .where(VoteEntitlement.id == decision.entitlement.id, VoteEntitlement.status == "unused")
+        .values(status="used", used_on=utcnow().date(), idempotency_key_hash=key_hash)
+    )
+    if used.rowcount != 1:
+        db.session.rollback()
+        return "already_voted"
+
+    from app.models.voting_models import Ballot
+
+    ballot_id = str(uuid.uuid4())
+    contest_id = decision.entitlement.contest_id
+    ballot = Ballot(id=ballot_id, election_id=election.id, contest_id=contest_id,
+                    preferences_enc=encrypt_field(json.dumps(preferences),
+                                                  ballot_aad(ballot_id, contest_id),
+                                                  key_name="BALLOT_KEY"))
+    db.session.add(ballot)
+    from app.security.audit_security import append_event
+
+    # R13/R18: the trail records THAT this person voted in a contest, never the
+    # ballot's id or its choices
+    append_event("ballot_accepted", "success", user, "election", election.id, contest_type=contest_type)
+    db.session.commit()  # R17/R20: success is reported only after this commit
+    return "accepted"
