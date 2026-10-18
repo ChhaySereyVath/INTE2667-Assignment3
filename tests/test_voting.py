@@ -389,3 +389,17 @@ def test_no_endpoint_hands_out_ballots(app):
     for rule in app.url_map.iter_rules():
         if "ballot" in rule.rule:
             assert rule.methods & {"GET"} == set(), rule.rule
+
+
+# --- Y21 ---
+
+def test_the_voting_page_is_for_citizens(app):
+    from tests.test_auth_pages import INLINE_SCRIPT
+    from tests.test_elections import delegate_client
+
+    alice = approved_voter(app, "alice")
+    body = alice.get("/voting").get_data(as_text=True)
+    assert 'id="open-elections"' in body and INLINE_SCRIPT.search(body) is None
+    assert 'href="/voting"' in alice.get("/dashboard").get_data(as_text=True)
+    dana = delegate_client(app)
+    assert dana.get("/voting").headers["Location"].endswith("/dashboard")

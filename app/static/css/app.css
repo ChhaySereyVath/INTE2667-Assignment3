@@ -130,3 +130,7 @@ td .button { padding: 0.35rem 0.75rem; margin-right: 0.4rem; font-size: 0.9rem; 
 fieldset.states { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 1rem; padding: 0.6rem 0.8rem; }
 fieldset.states legend { font-weight: 600; padding: 0 0.3rem; }
 label.check { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 400; margin-right: 0.9rem; }
+
+.plain-list { list-style: none; padding: 0; }
+.plain-list li { margin-bottom: 1.2rem; }
+.plain-list .button { margin: 0.4rem 0.4rem 0 0; }
