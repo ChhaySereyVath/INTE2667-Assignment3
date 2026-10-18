@@ -169,3 +169,48 @@ def verify_anchors():
         elif event.record_hash != anchor["record_hash"]:
             problems.append(f"anchor {number}: event {anchor['seq']} no longer matches")
     return problems
+
+# --- alerts -----------------------------------------------------------------
+
+security_log = logging.getLogger("evp.security")
+
+
+def raise_alert(kind, message):
+    """R14: a failed verification must not pass quietly. It is stored, logged as
+    CRITICAL (where monitoring picks it up), and written to the trail itself."""
+    from app.models.audit_models import SecurityAlert
+
+    db.session.add(SecurityAlert(kind=kind, message=message[:200]))
+    security_log.critical("security_alert kind=%s message=%s", kind, message[:200])
+
+
+def verify_audit_trail(actor=None):
+    """Check the chain and the anchors. On any problem, raise an alert. Returns problems."""
+    problems = verify_chain() + verify_anchors()
+    if problems:
+        raise_alert("audit_tampering", f"{len(problems)} problem(s): {problems[0]}")
+        append_event("audit_verify_failed", "failure", actor, problems=len(problems))
+    else:
+        append_event("audit_verified", "success", actor)
+    db.session.commit()
+    return problems
+
+
+@click.command("audit-anchor")
+@with_appcontext
+def audit_anchor_command():
+    """Sign the end of the audit trail into the anchor file (run every few minutes)."""
+    anchor = write_anchor()
+    click.echo(f"Anchored event {anchor['seq']}." if anchor else "No events yet.")
+
+
+@click.command("audit-verify")
+@with_appcontext
+def audit_verify_command():
+    """Check the audit trail against its hashes and anchors."""
+    problems = verify_audit_trail()
+    if problems:
+        for problem in problems:
+            click.echo(f"FAIL: {problem}")
+        raise SystemExit(1)
+    click.echo("Audit trail intact.")
