@@ -25,6 +25,9 @@ def create_app(test_config=None):
     app.config.from_mapping(
         SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///evp.db"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        # R06/R17 (Yufei): when two requests write at once, the second WAITS (up to 30 s)
+        # for SQLite's lock instead of failing at once with "database is locked"
+        SQLALCHEMY_ENGINE_OPTIONS={"connect_args": {"timeout": 30}},
         MAX_CONTENT_LENGTH=64 * 1024,  # R06: reject request bodies over 64 KB
         # R05: one full federal term (3 years) plus a year's margin
         HISTORY_RETENTION_DAYS=4 * 365,
