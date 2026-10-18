@@ -247,3 +247,29 @@ def test_preferences_are_encrypted(app):
                 assert candidate not in ballot.preferences_enc
     finally:
         clock.unfreeze()
+
+
+# --- Y14 ---
+
+def test_a_retry_with_the_same_key_does_not_vote_twice(app):
+    """R17: 'Retries and replayed requests do not create another vote.'"""
+    election_id, (alice,) = polling_election(app, "alice")
+    key = str(uuid.uuid4())
+    try:
+        assert vote(alice, app, election_id, key=key).status_code == 201
+        retry = vote(alice, app, election_id, key=key)
+        assert retry.status_code == 200
+        assert retry.get_json()["status"] == "already_accepted"
+        assert ballots(app) == 1
+    finally:
+        clock.unfreeze()
+
+
+def test_a_ballot_needs_an_idempotency_key(app):
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        response = alice.post("/voting/ballots", headers=csrf_headers(alice), json={
+            "election_id": election_id, "contest_type": "house", "preferences": []})
+        assert response.status_code == 400
+    finally:
+        clock.unfreeze()

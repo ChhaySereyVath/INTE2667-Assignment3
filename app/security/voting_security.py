@@ -75,6 +75,8 @@ def submit_ballot(user, election, contest_type, preferences, idempotency_key):
     """
     decision = check_eligibility(user, election, contest_type)
     key_hash = _key_hash(user, idempotency_key)
+    if decision.reason == "already_voted" and decision.entitlement.idempotency_key_hash == key_hash:
+        return "already_accepted"  # R17: a retried or replayed request makes no second vote
     if not decision.eligible:
         record_decision(user, election, contest_type, decision)
         db.session.commit()
