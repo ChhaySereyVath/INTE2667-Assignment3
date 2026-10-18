@@ -21,20 +21,18 @@ bcrypt, the failed-login lock and the audit trail).
 
 ## Result
 
-The task sheet records the following test-machine result. Its run date, computer, and
-p50 value were not recorded; these values have not been rerun in this workspace.
+These are the actual local load-test results:
 
 | Measure | Result |
 |---|---|
-| Date and computer | Not recorded in the task sheet |
 | Requests | 2000 |
-| p50 | Not recorded in the task sheet |
-| page_p95_ms | 307 ms |
-| login_p95_ms | 506 ms |
-| error_rate | 0% |
-| rate_limited (429) | About half the requests |
-| PASS / FAIL | PASS |
+| p50_ms | 2053.7 ms |
+| page_p95_ms | 2074.4 ms |
+| login_p95_ms | 2073.3 ms |
+| error_rate | 0.01 (exactly 1%) |
+| rate_limited | 630 |
+| passed | False |
 
-All 2000 requests come from one IP, so after the first 300 in a minute the rate limiter
-answers 429 ("Too many requests"). That is R06 working, not an error: the service
-stayed responsive because it refused the excess cheaply instead of trying to serve it.
+The login p95 met the 3000 ms target. The page p95 did not meet the 800 ms target.
+The error rate was exactly 1%, so it did not satisfy the target of under 1%. Rate
+limiting was active, with 630 requests receiving 429 responses.
