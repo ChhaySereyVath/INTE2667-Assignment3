@@ -76,6 +76,9 @@ def create_app(test_config=None):
 
     db.init_app(app)
     jwt.init_app(app)
+    from app.security.redaction import install_redaction
+    install_redaction(app)
+    
     from app.security.shared_security import register_security
     register_security(app) # S03: shared error handlers and security headers
 
@@ -103,7 +106,7 @@ def create_app(test_config=None):
     from app.security.audit_security import audit_anchor_command, audit_verify_command
     app.cli.add_command(audit_anchor_command)
     app.cli.add_command(audit_verify_command)
-    
+
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
