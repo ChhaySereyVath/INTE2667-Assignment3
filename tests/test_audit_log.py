@@ -163,3 +163,21 @@ def test_reordering_events_is_detected(app):
            "UPDATE audit_events SET seq = 3 WHERE seq = 99")
     with app.app_context():
         assert verify_chain() != []
+
+# --- KE05 ---
+
+def test_the_database_refuses_to_change_or_delete_events(app):
+    """R14: 'Audit records are append-only for ordinary application and administrator roles.'"""
+    three_events(app)
+    with app.app_context():
+        for statement in ("UPDATE audit_events SET result = 'success' WHERE seq = 1",
+                          "DELETE FROM audit_events WHERE seq = 1"):
+            with pytest.raises(IntegrityError), db.engine.begin() as connection:
+                connection.exec_driver_sql(statement)
+        assert AuditEvent.query.count() == 3
+
+
+def test_there_is_no_endpoint_that_changes_the_trail(app):
+    for rule in app.url_map.iter_rules():
+        if rule.rule.startswith("/audit"):
+            assert not ({"PUT", "PATCH", "DELETE"} & rule.methods), rule.rule
