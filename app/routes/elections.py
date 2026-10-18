@@ -72,3 +72,22 @@ def set_status(current_user, election_id):
         return jsonify({"error": "That change is not allowed from the current status"}), 409
     db.session.commit()
     return jsonify({"election": election.to_dict()}), 200
+
+
+@elections_bp.route("/elections-admin")
+@page_login_required
+def elections_page(current_user):
+    """The delegate's election screen. The API above enforces everything again."""
+    if not has_permission(current_user, "election:manage"):
+        return redirect(url_for("pages.dashboard"))
+    return render_template("elections/elections.html")
+
+
+@elections_bp.app_context_processor
+def election_links():
+    """Dashboard links for this subsystem, without editing pages.py."""
+    user = g.get("page_user")
+    return {
+        "can_manage_elections": user is not None and has_permission(user, "election:manage"),
+        "can_vote": user is not None and has_permission(user, "eligibility:self:check"),
+    }

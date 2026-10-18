@@ -154,3 +154,17 @@ def test_seed_election_needs_a_delegate(app):
     assert result.exit_code != 0
     with app.app_context():
         assert Election.query.count() == 0
+
+
+# --- Y20 ---
+
+def test_the_elections_page_is_for_delegates(app):
+    from tests.test_auth_pages import INLINE_SCRIPT
+    from tests.test_enrollment_access import citizen_client
+
+    dana = delegate_client(app)
+    body = dana.get("/elections-admin").get_data(as_text=True)
+    assert 'id="election-form"' in body and INLINE_SCRIPT.search(body) is None
+    assert 'href="/elections-admin"' in dana.get("/dashboard").get_data(as_text=True)
+    alice = citizen_client(app)
+    assert alice.get("/elections-admin").headers["Location"].endswith("/dashboard")

@@ -17,6 +17,9 @@
   {% if can_staff %}
   <p><a class="button" href="{{ url_for('enrollment_pages.staff_queue_page') }}">Enrolment queue</a></p>
   {% endif %}
+  {% if can_manage_elections %}
+  <p><a class="button" href="{{ url_for('elections.elections_page') }}">Elections</a></p>
+  {% endif %}
   {% if can_enrol %}
   <p><a class="button" href="{{ url_for('enrollment_pages.my_enrolment_page') }}">My enrolment</a></p>
   {% endif %}
