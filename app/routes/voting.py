@@ -92,3 +92,12 @@ def cast_ballot(current_user):
     if outcome == "already_voted":
         return jsonify({"error": REFUSALS[outcome]}), 409
     return jsonify({"error": REFUSALS[outcome], "reason": outcome}), 403
+
+
+@voting_bp.route("/voting")
+@page_login_required
+def voting_page(current_user):
+    """Citizens check their eligibility here. (Casting is done at a polling terminal.)"""
+    if not has_permission(current_user, "eligibility:self:check"):
+        return redirect(url_for("pages.dashboard"))
+    return render_template("voting/voting.html")

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Voting - AEC Voting Platform{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Can I vote?</h1>
+  <p class="muted">Check whether you are eligible to vote in an open election. Ballots are cast
+     at a polling place.</p>
+  <p id="voting-empty" class="muted" hidden>No election is open for voting.</p>
+  <ul id="open-elections" class="plain-list"></ul>
+</section>
+<button type="button" class="button secondary" id="logout-button">Log out</button>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/voting.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}
