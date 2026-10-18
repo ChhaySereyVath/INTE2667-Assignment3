@@ -176,3 +176,15 @@ def test_staff_cannot_use_the_voter_endpoints(app):
     election_id = make_election(app)
     dana = delegate_client(app)
     assert check(dana, election_id).status_code == 403
+
+
+# --- Y12 ---
+
+def test_a_ballot_row_has_nothing_that_identifies_the_voter(app):
+    """R18: 'Ballot records do not contain a direct voter identifier.'"""
+    from app.models.voting_models import Ballot
+
+    columns = {c.name for c in Ballot.__table__.columns}
+    assert columns == {"id", "election_id", "contest_id", "preferences_enc", "signature"}
+    for word in ("user", "voter", "session", "ip", "time", "seq", "created", "key"):
+        assert not any(word in column for column in columns), word

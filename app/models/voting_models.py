@@ -29,3 +29,21 @@ class VoteEntitlement(db.Model):
     # R17: the database itself refuses a second entitlement for the same contest
     __table_args__ = (db.UniqueConstraint("user_id", "election_id", "contest_type",
                                           name="uq_one_entitlement_per_contest"),)
+
+
+class Ballot(db.Model):
+    """R18: a ballot with nothing that identifies the voter.
+
+    - The id is random, so it says nothing about who or when.
+    - There is no timestamp and no sequence number.
+    """
+
+    __tablename__ = "ballots"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    election_id = db.Column(db.String(36), db.ForeignKey("elections.id"), nullable=False)
+    contest_id = db.Column(db.String(36), db.ForeignKey("contests.id"), nullable=False, index=True)
+    # R01: the preferences are encrypted, bound to this ballot's id and contest
+    preferences_enc = db.Column(db.Text, nullable=False)
+    # R19: filled in by Keane's integrity code; lets anyone detect an altered ballot
+    signature = db.Column(db.String(128))
