@@ -96,3 +96,43 @@ def test_parallel_password_guesses_are_all_counted(tmp_path):
     assert login(app.test_client(), "alice", "Correct-Horse-42").status_code == 429  # locked
     with app.app_context():
         db.engine.dispose()
+
+
+# --- Y08 ---
+
+def test_oversized_requests_are_refused_everywhere(app, client):
+    """R06: 'Oversized requests are rejected.' One limit, set in create_app, covers
+    every endpoint: the body is refused as soon as anything tries to read it."""
+    big = {"username": "x" * 70_000, "password": "y", "preferences": ["x"] * 10}
+    for path in ("/auth/login", "/auth/register", "/auth/recovery/request"):
+        response = client.post(path, json=big)
+        assert response.status_code == 413, path
+        assert response.get_json() == {"error": "Request too large"}
+    with app.app_context():
+        make_user()
+    login(client, "alice", "Correct-Horse-42")  # and for signed-in requests too
+    assert client.post("/enrollment/me", json=big, headers=csrf_headers(client)).status_code == 413
+
+
+def test_the_load_test_meets_its_target(tmp_path):
+    """R06: 'The system remains responsive under the documented prototype load test.'
+    A much smaller run than the documented 2000-request test (100 requests from 10
+    threads), so the suite stays quick and passes on a slow laptop. It uses a database
+    FILE, like the real app, so the threads really do run at once."""
+    from app.security.load_test import in_process_sender, run_load
+
+    app = create_app(make_test_config(SQLALCHEMY_DATABASE_URI=f"sqlite:///{tmp_path / 'load.db'}"))
+    report = run_load(in_process_sender(app), total=100, workers=10)
+    assert report["requests"] == 100
+    assert report["error_rate"] == 0
+    assert report["passed"], report
+    with app.app_context():
+        db.engine.dispose()
+
+
+def test_the_load_test_summary_counts_429_as_not_an_error():
+    from app.security.load_test import summarise
+
+    report = summarise([("page", 200, 10.0)] * 90 + [("login", 429, 1.0)] * 9 + [("page", 500, 50.0)])
+    assert report["rate_limited"] == 9
+    assert report["error_rate"] == 0.01
