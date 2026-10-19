@@ -163,6 +163,8 @@ def create_staff(current_user):
                                 data["role"], states, data["temporary_password"])
     if user is None:
         return jsonify({"error": "Invalid request"}), 400
+    append_event("staff_created", "success", current_user, "account", user.id, role=user.role)
+    db.session.commit()
     return jsonify({"message": "Staff account created", "user": user.to_dict()}), 201
 
 @auth_bp.route("/admin/roles", methods=["POST"])
@@ -185,6 +187,8 @@ def grant_role(current_user):
         return jsonify({"error": "Not found"}), 404
 
     previous, target.role = target.role, data["role"]
+    append_event("role_granted", "success", current_user, "account", target.id,
+                 previous_role=previous, new_role=target.role)
     db.session.commit()
     revoke_all_sessions(target, "role_changed")
     queue_notification(target, "role_changed", previous_role=previous, new_role=target.role)

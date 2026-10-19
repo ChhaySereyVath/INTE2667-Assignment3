@@ -376,3 +376,27 @@ def test_austins_refused_record_access_is_recorded(app):
     event = events(app)[-1]
     assert (event["action"], event["target_type"], event["target_id"]) == (
         "access_denied", "enrolment", record_id)
+
+# --- KE12 ---
+
+def test_enrolment_changes_are_recorded_without_their_values(app):
+    from tests.test_enrollment_access import citizen_client, enrol
+
+    client = citizen_client(app)
+    enrol(client)
+    event = [e for e in events(app) if e["action"] == "enrolment_change"][0]
+    assert event["details"] == {"field": "enrolment", "reason": "created"}
+    assert "Testperson" not in json.dumps(events(app))
+
+
+def test_role_changes_are_recorded(app):
+    from tests.test_auth_recovery import admin_client
+
+    admin = admin_client(app)
+    with app.app_context():
+        emma_id = make_user(username="emma").id
+    admin.post("/auth/admin/roles", json={"user_id": emma_id, "role": "aec_employee"},
+               headers=csrf_headers(admin))
+    event = events(app)[-1]
+    assert event["action"] == "role_granted" and event["target_id"] == emma_id
+    assert event["details"] == {"previous_role": "citizen", "new_role": "aec_employee"}

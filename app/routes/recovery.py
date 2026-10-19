@@ -4,6 +4,8 @@ from flask import Blueprint, jsonify, request
 from app.security.recovery_security import confirm_owner, start_recovery, decide, pending_requests, complete_reset
 from app.security.validators import EMAIL_RE, POSTCODE_RE, validate
 from app.security.shared_security import permission_required
+from app import db
+from app.security.audit_security import append_event
 from app.security.auth_security import password_problem
 
 recovery_bp = Blueprint("recovery", __name__)
@@ -72,9 +74,15 @@ def decide_recovery(current_user, request_id):
         return jsonify({"error": "Invalid request"}), 400
     outcome = decide(request_id, current_user, data["decision"])
     if outcome == "self":
+        append_event("recovery_decision", "denied", current_user, "recovery", request_id,
+                     reason="own request")
+        db.session.commit()
         return jsonify({"error": "Access denied"}), 403
     if outcome == "not_found":
         return jsonify({"error": "Not found"}), 404
+    append_event("recovery_decision", "success", current_user, "recovery", request_id,
+                 decision=data["decision"])
+    db.session.commit()
     return jsonify({"message": f"Recovery {data['decision']}"}), 200
 
 
