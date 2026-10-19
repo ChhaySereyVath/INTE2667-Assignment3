@@ -135,3 +135,20 @@ def test_candidate_details_are_validated(app):
                         ("Robert'); DROP TABLE candidates;--", "Independent")):
         assert add(dana, contest_id, name, party).status_code == 400
     assert signed(app) == []
+
+# --- KE18 ---
+
+def test_edits_and_withdrawals_are_signed_with_before_and_after(app):
+    election_id = make_election(app)
+    dana = delegate_client(app)
+    candidate_id = add(dana, contest_of(app, election_id, "house")).get_json()["candidate"]["id"]
+    edit = dana.patch(f"/candidates/{candidate_id}", headers=csrf_headers(dana),
+                      json={"name": "Morgan Ellis-Shaw", "party": "Civic Union"})
+    assert edit.status_code == 200
+    assert dana.post(f"/candidates/{candidate_id}/withdraw", headers=csrf_headers(dana)).status_code == 200
+    create, update, withdraw = signed(app)
+    assert update["payload"] == {"before": {"name": "Morgan Ellis", "party": "Independent"},
+                                 "after": {"name": "Morgan Ellis-Shaw", "party": "Civic Union"}}
+    assert withdraw["action"] == "candidate_withdraw"
+    with app.app_context():
+        assert db.session.get(Candidate, candidate_id).withdrawn is True
