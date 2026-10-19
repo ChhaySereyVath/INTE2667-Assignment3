@@ -112,3 +112,17 @@ def confirm(current_user, exclusion_id):
         return jsonify({"error": "A different delegate must confirm this exclusion."}), 403
     db.session.commit()
     return jsonify({"exclusion_id": row.id, "confirmed": True}), 200
+
+@results_bp.route("/contests-admin")
+@page_login_required
+def contests_page(current_user):
+    """Delegates' screen for candidates, counts and approvals."""
+    if not has_permission(current_user, "candidate:manage"):
+        return redirect(url_for("pages.dashboard"))
+    return render_template("results/contests.html", states=user_states(current_user))
+
+
+@results_bp.app_context_processor
+def results_links():
+    user = g.get("page_user")
+    return {"can_count": user is not None and has_permission(user, "candidate:manage")}

@@ -246,3 +246,17 @@ def test_an_exclusion_needs_a_second_delegate_and_changes_the_recount(app):
     recount = count(dana, contest_id).get_json()["count_run"]["result"]
     assert recount["excluded"] == [a]
     assert recount["elected"] == [b]  # a's ballots flow to b (2) and c (1)
+
+# --- KE27 ---
+
+def test_the_contests_page_is_for_delegates(app):
+    from tests.test_auth_pages import INLINE_SCRIPT
+    from tests.test_enrollment_access import citizen_client
+
+    dana = delegate_client(app)
+    body = dana.get("/contests-admin").get_data(as_text=True)
+    assert 'id="candidate-form"' in body and 'id="count-button"' in body
+    assert INLINE_SCRIPT.search(body) is None and "VIC" in body
+    assert 'href="/contests-admin"' in dana.get("/dashboard").get_data(as_text=True)
+    alice = citizen_client(app)
+    assert alice.get("/contests-admin").headers["Location"].endswith("/dashboard")

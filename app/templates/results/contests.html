@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Candidates and counts - AEC Voting Platform{% endblock %}
+{% block content %}
+<div id="notice" class="notice" hidden></div>
+<ul id="field-errors" class="field-errors" hidden></ul>
+
+<section class="card">
+  <h1>Candidates and counts</h1>
+  <p class="muted">Contests in your states: {{ states|join(", ") }}. Every change here is signed
+     with your name, and needs a security-key check in the last 10 minutes.</p>
+  <label for="election-select">Election</label>
+  <select id="election-select"></select>
+  <label for="contest-select">Contest</label>
+  <select id="contest-select"></select>
+</section>
+
+<section class="card">
+  <h2>Candidates</h2>
+  <ol id="candidate-list"></ol>
+  <form id="candidate-form">
+    <label for="candidate_name">Name</label>
+    <input type="text" id="candidate_name" maxlength="100" required>
+    <label for="candidate_party">Party</label>
+    <input type="text" id="candidate_party" maxlength="60" value="Independent" required>
+    <button type="submit" class="button">Add candidate</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Count</h2>
+  <p class="muted">A count runs only after polling closes, and only if every ballot passes its
+     integrity check. Another delegate must approve the result.</p>
+  <button type="button" class="button" id="count-button">Run count</button>
+  <div class="table-wrap">
+    <table id="runs" hidden>
+      <thead><tr><th>When (UTC)</th><th>Status</th><th>Elected</th><th>Approval</th></tr></thead>
+      <tbody id="run-rows"></tbody>
+    </table>
+  </div>
+</section>
+<button type="button" class="button secondary" id="logout-button">Log out</button>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/contests.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}
