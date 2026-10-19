@@ -400,3 +400,46 @@ def test_role_changes_are_recorded(app):
     event = events(app)[-1]
     assert event["action"] == "role_granted" and event["target_id"] == emma_id
     assert event["details"] == {"previous_role": "citizen", "new_role": "aec_employee"}
+
+# --- KE13 ---
+
+def auditor_client(app, username="audrey"):
+    with app.app_context():
+        make_user(username=username, role="auditor")
+    client = app.test_client()
+    login(client, username, "Correct-Horse-42")
+    verify_mfa(app)
+    return client
+
+
+def test_an_auditor_reads_the_trail_newest_first(app):
+    three_events(app)
+    auditor = auditor_client(app)
+    body = auditor.get("/audit/events").get_json()
+    assert [e["seq"] for e in body["events"]] == [4, 3, 2, 1]  # 4 is the auditor's own login
+    only = auditor.get("/audit/events?action=access_denied").get_json()["events"]
+    assert {e["action"] for e in only} == {"access_denied"}
+    assert auditor.get("/audit/events?action=<script>").status_code == 400
+
+
+def test_the_trail_needs_the_auditor_role_and_mfa(app):
+    with app.app_context():
+        make_user(username="audrey", role="auditor")
+        make_user(username="admin1", role="administrator")
+    auditor = app.test_client()
+    login(auditor, "audrey", "Correct-Horse-42")
+    assert auditor.get("/audit/events").status_code == 403  # password only: not enough (R08)
+    admin = app.test_client()
+    login(admin, "admin1", "Correct-Horse-42")
+    verify_mfa(app)
+    assert admin.get("/audit/events").status_code == 403  # admins are not auditors (R12)
+
+
+def test_an_auditor_can_verify_the_trail(app):
+    three_events(app)
+    auditor = auditor_client(app)
+    response = auditor.post("/audit/verify", headers=csrf_headers(auditor))
+    assert response.get_json() == {"intact": True, "problems": []}
+    as_dba(app, "UPDATE audit_events SET result = 'success' WHERE seq = 2")
+    response = auditor.post("/audit/verify", headers=csrf_headers(auditor))
+    assert response.get_json()["intact"] is False

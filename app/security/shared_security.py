@@ -74,6 +74,7 @@ ROLE_PERMISSIONS = {
     }),
     "auditor": frozenset({
         "audit:log:read",
+        "audit:verify",
     }),
 }
 
@@ -83,6 +84,7 @@ PRIVILEGED_PERMISSIONS = frozenset(
     ROLE_PERMISSIONS["aec_employee"]
     | ROLE_PERMISSIONS["commissioner_delegate"]
     | ROLE_PERMISSIONS["administrator"]
+    | ROLE_PERMISSIONS["auditor"]  # R08/R13: the audit trail is privileged too
 )
 
 

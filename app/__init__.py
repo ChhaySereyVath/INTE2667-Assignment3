@@ -78,7 +78,7 @@ def create_app(test_config=None):
     jwt.init_app(app)
     from app.security.redaction import install_redaction
     install_redaction(app)
-    
+
     from app.security.shared_security import register_security
     register_security(app) # S03: shared error handlers and security headers
 
@@ -115,6 +115,9 @@ def create_app(test_config=None):
     app.register_blueprint(enrollment_bp, url_prefix="/enrollment")
     app.register_blueprint(enrollment_pages_bp)
 
+    from app.routes.audit import audit_bp
+    app.register_blueprint(audit_bp)
+    
     from app.routes.pages import pages_bp
     app.register_blueprint(pages_bp)
 
