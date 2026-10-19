@@ -52,6 +52,11 @@ def log_refused(user, action, target_type, target_id):
     """R11: 'Unauthorised access attempts are rejected and logged.'"""
     security_log.warning("access_denied actor=%s action=%s target=%s:%s result=denied",
                          user.id, action, target_type, _safe_id(target_id))
+    from app.security.audit_security import append_event
+
+    append_event("access_denied", "denied", user, target_type, _safe_id(target_id),
+                 reason=action)
+    db.session.commit()
 
 def get_scoped_or_404(record_id, user, action):
     """Fetch a record only if this user may use it for this action (R11).

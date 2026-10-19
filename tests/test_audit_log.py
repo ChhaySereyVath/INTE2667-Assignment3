@@ -353,3 +353,26 @@ def test_a_locked_login_is_recorded(app, client):
     for _ in range(app.config["LOGIN_MAX_FAILURES_PER_IP"] + 1):
         login(client, "alice", "wrong-password-1")
     assert actions(app)[-1] == "login_locked"
+
+def test_a_refused_permission_is_recorded(app, client):
+    with app.app_context():
+        make_user()
+    login(client, "alice", "Correct-Horse-42")
+    assert client.get("/enrollment/pending").status_code == 403  # a staff-only list
+    event = events(app)[-1]
+    assert event["action"] == "access_denied" and event["result"] == "denied"
+    assert event["details"] == {"permission": "enrolment:staff:read", "reason": "no permission"}
+
+# --- KE11 ---
+
+def test_austins_refused_record_access_is_recorded(app):
+    from tests.test_enrollment_access import staff_client
+    from tests.test_enrollment_hardening import vic_record
+
+    record_id = vic_record(app)
+
+    nsw = staff_client(app, "nick.nsw", "aec_employee", ["NSW"])
+    assert nsw.get(f"/enrollment/{record_id}").status_code == 404
+    event = events(app)[-1]
+    assert (event["action"], event["target_type"], event["target_id"]) == (
+        "access_denied", "enrolment", record_id)
