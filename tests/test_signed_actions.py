@@ -106,3 +106,32 @@ def test_a_password_only_session_cannot_sign_anything(app):
     client = app.test_client()
     login(client, "dana2", "Correct-Horse-42")  # no MFA
     assert client.post("/t/fresh", headers=csrf_headers(client)).status_code == 403
+
+# --- KE17 ---
+
+def test_a_delegate_adds_candidates_only_in_their_states(app):
+    election_id = make_election(app)
+    dana = delegate_client(app)  # VIC only
+    assert add(dana, contest_of(app, election_id, "house", "VIC")).status_code == 201
+    refused = add(dana, contest_of(app, election_id, "house", "NSW"))
+    assert refused.status_code == 404
+    outcomes = [(r["outcome"], r["payload"].get("reason")) for r in signed(app)]
+    assert outcomes == [("success", None), ("denied", "outside your states")]  # R15: refusals are signed too
+
+
+def test_candidates_cannot_change_once_polling_opens(app):
+    election_id = make_election(app, status="polling_open")
+    dana = delegate_client(app)
+    response = add(dana, contest_of(app, election_id, "house"))
+    assert response.status_code == 409
+    assert signed(app)[-1]["payload"]["reason"] == "nominations closed"
+
+
+def test_candidate_details_are_validated(app):
+    election_id = make_election(app)
+    dana = delegate_client(app)
+    contest_id = contest_of(app, election_id, "house")
+    for name, party in (("<script>alert(1)</script>", "Independent"), ("Morgan", "x" * 61),
+                        ("Robert'); DROP TABLE candidates;--", "Independent")):
+        assert add(dana, contest_id, name, party).status_code == 400
+    assert signed(app) == []
