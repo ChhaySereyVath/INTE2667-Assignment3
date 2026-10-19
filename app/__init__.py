@@ -127,6 +127,9 @@ def create_app(test_config=None):
     app.cli.add_command(audit_anchor_command)
     app.cli.add_command(audit_verify_command)
 
+    from app.security.signed_actions import verify_actions_command
+    app.cli.add_command(verify_actions_command)
+
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")

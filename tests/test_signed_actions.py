@@ -152,3 +152,47 @@ def test_edits_and_withdrawals_are_signed_with_before_and_after(app):
     assert withdraw["action"] == "candidate_withdraw"
     with app.app_context():
         assert db.session.get(Candidate, candidate_id).withdrawn is True
+
+# --- KE19 ---
+
+def tamper(app, statement):
+    with app.app_context(), db.engine.begin() as connection:
+        connection.exec_driver_sql("DROP TRIGGER signed_actions_no_update")
+        connection.exec_driver_sql(statement)
+
+
+def test_an_edited_record_fails_verification(app):
+    election_id = make_election(app)
+    dana = delegate_client(app)
+    add(dana, contest_of(app, election_id, "house"))
+    runner = app.test_cli_runner()
+    assert "All 1 signed actions verify" in runner.invoke(args=["verify-actions"]).output
+    tamper(app, "UPDATE signed_actions SET payload = replace(payload, 'Morgan', 'Mallory')")
+    result = runner.invoke(args=["verify-actions"])
+    assert result.exit_code == 1 and "fails verification" in result.output
+
+
+def test_a_record_blamed_on_someone_else_fails_verification(app):
+    from app.models.user import User
+    from app.security.signed_actions import verify_actions
+
+    election_id = make_election(app)
+    dana = delegate_client(app)
+    add(dana, contest_of(app, election_id, "house"))
+    with app.app_context():
+        other = User.query.filter_by(username="admin-seed").one().id
+    tamper(app, f"UPDATE signed_actions SET actor_id = '{other}'")
+    with app.app_context():
+        assert len(verify_actions()) == 1
+
+
+def test_no_signing_key_is_in_the_source_code():
+    """R15: 'Signing keys are protected and are not stored in source code.'"""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "app"
+    for path in root.rglob("*.py"):
+        text = path.read_text()
+        assert not re.search(r"['\"][0-9a-f]{64}['\"]", text), path  # no hard-coded 32-byte key
+        assert "PRIVATE KEY-----" not in text, path
