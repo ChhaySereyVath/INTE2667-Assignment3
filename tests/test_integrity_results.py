@@ -229,3 +229,20 @@ def test_published_results_show_only_approved_counts(app):
     (house,) = body["contests"]
     assert house["elected"] == ["Avery Lin"] and house["ballots"] == 3
     assert house["first_preferences"] == {"Avery Lin": 2, "Blake Okafor": 1, "Casey Nguyen": 0}
+
+# --- KE26 ---
+
+def test_an_exclusion_needs_a_second_delegate_and_changes_the_recount(app):
+    _, contest_id = closed_election(app)
+    a, b, c = candidate_ids(app, contest_id)
+    dana = delegate_client(app)
+    vic2 = delegate_client(app, "victor.vic")
+    exclusion = dana.post(f"/contests/{contest_id}/exclusions", headers=csrf_headers(dana),
+                          json={"candidate_id": a}).get_json()["exclusion_id"]
+    # not confirmed yet: the count ignores it
+    assert count(dana, contest_id).get_json()["count_run"]["result"]["elected"] == [a]
+    assert dana.post(f"/exclusions/{exclusion}/confirm", headers=csrf_headers(dana)).status_code == 403
+    assert vic2.post(f"/exclusions/{exclusion}/confirm", headers=csrf_headers(vic2)).status_code == 200
+    recount = count(dana, contest_id).get_json()["count_run"]["result"]
+    assert recount["excluded"] == [a]
+    assert recount["elected"] == [b]  # a's ballots flow to b (2) and c (1)

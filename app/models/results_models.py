@@ -49,3 +49,16 @@ class CountRun(db.Model):
             "created_at": self.created_at.isoformat(),
             "approved": self.approved_by is not None,
         }
+
+class Exclusion(db.Model):
+    """R15: a candidate left out of a recount. Two different delegates are needed:
+    one proposes, another confirms. Only confirmed exclusions affect a count."""
+
+    __tablename__ = "exclusions"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    contest_id = db.Column(db.String(36), db.ForeignKey("contests.id"), nullable=False, index=True)
+    candidate_id = db.Column(db.String(36), db.ForeignKey("candidates.id"), nullable=False)
+    proposed_by = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    confirmed_by = db.Column(db.String(36), db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)

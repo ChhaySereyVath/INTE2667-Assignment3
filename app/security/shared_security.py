@@ -71,6 +71,7 @@ ROLE_PERMISSIONS = {
         "election:manage",  # Yufei: create elections, open and close polling
         "candidate:manage",  # Keane: R15 signed candidate changes
         "count:run",  # Keane: R19 counts only after integrity checks
+        "count:exclude",  # Keane: R15 two-person recount exclusions
         "result:approve",  # Keane: R15 a second delegate approves
     }),
     "administrator": frozenset({

@@ -33,7 +33,7 @@ def run_count(contest, actor):
     ballots = [read_preferences(b) for b in
                Ballot.query.filter_by(contest_id=contest.id).order_by(Ballot.id)]
     candidates = [c.id for c in contest.candidates if not c.withdrawn]
-    excluded = []  # KE26 adds recount exclusions here
+    excluded = confirmed_exclusions(contest)  # KE26 adds recount exclusions here
     if contest.contest_type == "house":
         result = count_house(ballots, candidates, excluded, seed=contest.id)
     else:
@@ -89,3 +89,38 @@ def published_results(election):
             "ballots": result["ballots"],
         })
     return contests
+
+def confirmed_exclusions(contest):
+    """Only exclusions a SECOND delegate has confirmed affect a count."""
+    from app.models.results_models import Exclusion
+
+    return [row.candidate_id for row in
+            Exclusion.query.filter(Exclusion.contest_id == contest.id,
+                                   Exclusion.confirmed_by.isnot(None))]
+
+
+def propose_exclusion(contest, candidate, actor):
+    from app.models.results_models import Exclusion
+
+    row = Exclusion(contest_id=contest.id, candidate_id=candidate.id, proposed_by=actor.id)
+    db.session.add(row)
+    db.session.flush()
+    record_signed_action(actor, "exclusion_propose", "candidate", candidate.id,
+                         {"exclusion_id": row.id, "contest_id": contest.id}, "success")
+    return row
+
+
+def confirm_exclusion(row, actor):
+    """Two-person rule: the proposer cannot confirm their own proposal."""
+    if row.proposed_by == actor.id or row.confirmed_by is not None:
+        record_signed_action(actor, "exclusion_confirm", "candidate", row.candidate_id,
+                             {"exclusion_id": row.id}, "denied")
+        return False
+    row.confirmed_by = actor.id
+    record_signed_action(actor, "exclusion_confirm", "candidate", row.candidate_id,
+                         {"exclusion_id": row.id}, "success")
+    return True
+
+
+def candidate_or_none(candidate_id):
+    return db.session.get(Candidate, str(candidate_id))

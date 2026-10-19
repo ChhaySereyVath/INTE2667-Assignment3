@@ -78,3 +78,37 @@ def public_results(election_id):
     if election is None or election.status != "results_published":
         return jsonify({"error": "Not found"}), 404
     return jsonify({"election": election.name, "contests": published_results(election)}), 200
+
+@results_bp.route("/contests/<contest_id>/exclusions", methods=["POST"])
+@permission_required("count:exclude")
+@recent_mfa_required
+def propose(current_user, contest_id):
+    from app.security.results_security import candidate_or_none, propose_exclusion
+
+    ok, data, errors = validate(request.get_json(silent=True), EXCLUSION_SCHEMA)
+    if not ok:
+        return jsonify({"error": "Invalid request", "fields": errors}), 400
+    contest = _contest_in_scope(current_user, contest_id)
+    candidate = candidate_or_none(data["candidate_id"])
+    if contest is None or candidate is None or candidate.contest_id != contest.id:
+        return jsonify({"error": "Not found"}), 404
+    row = propose_exclusion(contest, candidate, current_user)
+    db.session.commit()
+    return jsonify({"exclusion_id": row.id, "confirmed": False}), 201
+
+
+@results_bp.route("/exclusions/<exclusion_id>/confirm", methods=["POST"])
+@permission_required("count:exclude")
+@recent_mfa_required
+def confirm(current_user, exclusion_id):
+    from app.models.results_models import Exclusion
+    from app.security.results_security import confirm_exclusion
+
+    row = db.session.get(Exclusion, exclusion_id)
+    if row is None or _contest_in_scope(current_user, row.contest_id) is None:
+        return jsonify({"error": "Not found"}), 404
+    if not confirm_exclusion(row, current_user):
+        db.session.commit()  # keep the signed record of the refusal
+        return jsonify({"error": "A different delegate must confirm this exclusion."}), 403
+    db.session.commit()
+    return jsonify({"exclusion_id": row.id, "confirmed": True}), 200
