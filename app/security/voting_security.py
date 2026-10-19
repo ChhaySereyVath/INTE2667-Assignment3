@@ -105,6 +105,9 @@ def submit_ballot(user, election, contest_type, preferences, idempotency_key):
                     preferences_enc=encrypt_field(json.dumps(preferences),
                                                   ballot_aad(ballot_id, contest_id),
                                                   key_name="BALLOT_KEY"))
+    from app.security.integrity import sign_ballot
+
+    sign_ballot(ballot)  # Keane, R19: lets a later change to this ballot be detected
     db.session.add(ballot)
     from app.security.audit_security import append_event
 
