@@ -70,6 +70,7 @@ ROLE_PERMISSIONS = {
         "enrolment:history:read_sensitive",
         "election:manage",  # Yufei: create elections, open and close polling
         "candidate:manage",  # Keane: R15 signed candidate changes
+        "count:run",  # Keane: R19 counts only after integrity checks
     }),
     "administrator": frozenset({
         "admin:user:create",

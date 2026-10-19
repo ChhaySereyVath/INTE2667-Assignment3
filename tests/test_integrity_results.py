@@ -151,3 +151,40 @@ def test_a_forged_seal_is_detected(app):
     _, contest_id = closed_election(app)
     as_dba(app, f"UPDATE ballot_seals SET ballot_count = 4 WHERE contest_id = '{contest_id}'")
     assert "the seal's signature is invalid" in problems(app, contest_id)
+
+# --- KE24 ---
+
+def test_a_count_runs_on_verified_ballots(app):
+    election_id, contest_id = closed_election(app)
+    dana = delegate_client(app)
+    response = count(dana, contest_id)
+    assert response.status_code == 201
+    run = response.get_json()["count_run"]
+    a, b, c = candidate_ids(app, contest_id)
+    assert run["status"] == "completed"
+    assert run["result"]["elected"] == [a]  # a has 2 of 3 first preferences
+    assert run["result"]["ballots"] == 3
+
+
+def test_a_tampered_contest_is_never_counted(app):
+    """R19: 'Invalid records are not silently included in counting' and 'Failed
+    integrity verification prevents the affected count from being released.'"""
+    _, contest_id = closed_election(app)
+    as_dba(app, "DELETE FROM ballots WHERE id = (SELECT MIN(id) FROM ballots)")
+    dana = delegate_client(app)
+    response = count(dana, contest_id)
+    assert response.status_code == 409
+    run = response.get_json()["count_run"]
+    assert run["status"] == "integrity_failed" and run["result"] is None
+    with app.app_context():
+        assert SecurityAlert.query.filter_by(kind="ballot_tampering").count() == 1
+        from app.models.audit_models import AuditEvent
+
+        assert AuditEvent.query.filter_by(action="integrity_failed").count() == 1
+
+
+def test_no_count_before_polling_closes(app):
+    election_id, _ = polling_election(app, "alice")
+    clock.unfreeze()
+    dana = delegate_client(app)
+    assert count(dana, contest_of(app, election_id, "house")).status_code == 409

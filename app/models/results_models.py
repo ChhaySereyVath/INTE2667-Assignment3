@@ -20,3 +20,32 @@ class BallotSeal(db.Model):
     def signed_fields(self):
         return {"contest_id": self.contest_id, "ballot_count": self.ballot_count,
                 "merkle_root": self.merkle_root, "sealed_at": self.sealed_at.isoformat()}
+
+class CountRun(db.Model):
+    """One count of one contest. A run whose integrity check failed keeps no result
+    and can never be approved (R19)."""
+
+    __tablename__ = "count_runs"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    contest_id = db.Column(db.String(36), db.ForeignKey("contests.id"), nullable=False, index=True)
+    run_by = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # completed | integrity_failed
+    result = db.Column(db.Text)  # JSON from the counting functions
+    problems = db.Column(db.Text)  # JSON list, for integrity_failed runs
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    approved_by = db.Column(db.String(36), db.ForeignKey("users.id"))
+    approved_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        import json
+
+        return {
+            "id": self.id,
+            "contest_id": self.contest_id,
+            "status": self.status,
+            "result": json.loads(self.result) if self.result else None,
+            "problems": json.loads(self.problems) if self.problems else [],
+            "created_at": self.created_at.isoformat(),
+            "approved": self.approved_by is not None,
+        }
