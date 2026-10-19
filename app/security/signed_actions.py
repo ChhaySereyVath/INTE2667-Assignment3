@@ -62,3 +62,23 @@ def verify_actions():
     return [f"signed action {row.id} fails verification"
             for row in SignedAction.query.order_by(SignedAction.signed_at).all()
             if not verify(row.signed_fields(), row.signature, public)]
+
+
+FRESH_MFA_MINUTES = 10
+
+
+def recent_mfa_required(view):
+    """R15: signing a sensitive action needs a security-key check in the last 10
+    minutes, not just a session that passed MFA hours ago (step-up authentication).
+    Use it under @permission_required, which has already checked MFA happened."""
+
+    @wraps(view)
+    def inner(*args, current_user, **kwargs):
+        if current_app.config["REQUIRE_MFA_FOR_PRIVILEGED"]:
+            verified_at = g.current_session.mfa_verified_at
+            if verified_at is None or utcnow() - verified_at > timedelta(minutes=FRESH_MFA_MINUTES):
+                return jsonify({"error": "Please confirm with your security key again",
+                                "reauthenticate": True}), 401
+        return view(*args, current_user=current_user, **kwargs)
+
+    return inner

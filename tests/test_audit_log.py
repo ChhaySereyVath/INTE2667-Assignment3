@@ -53,10 +53,6 @@ def test_the_trail_starts_empty_with_its_end_marker_at_zero(app):
         assert (head.seq, head.record_hash) == (0, "0" * 64)
         assert AuditEvent.query.count() == 0
 
-<<<<<<< HEAD
-=======
-
->>>>>>> origin/election-voting-v2
 # --- KE02 ---
 
 def test_an_event_records_actor_action_target_result_and_time(app, frozen_clock):
@@ -105,10 +101,6 @@ def test_each_event_carries_the_hash_of_the_one_before(app):
         assert rows[2].prev_hash == rows[1].record_hash
         assert len({row.record_hash for row in rows}) == 3
 
-<<<<<<< HEAD
-=======
-
->>>>>>> origin/election-voting-v2
 # --- KE03 ---
 
 def test_secrets_and_ballot_choices_never_reach_the_trail(app):
@@ -132,10 +124,6 @@ def test_detail_values_are_cut_short(app):
         db.session.commit()
         assert len(json.loads(AuditEvent.query.one().details)["reason"]) == 100
 
-<<<<<<< HEAD
-=======
-
->>>>>>> origin/election-voting-v2
 # --- KE04 ---
 
 def test_an_untouched_trail_verifies(app):
@@ -176,10 +164,6 @@ def test_reordering_events_is_detected(app):
     with app.app_context():
         assert verify_chain() != []
 
-<<<<<<< HEAD
-=======
-
->>>>>>> origin/election-voting-v2
 # --- KE05 ---
 
 def test_the_database_refuses_to_change_or_delete_events(app):
@@ -197,7 +181,6 @@ def test_there_is_no_endpoint_that_changes_the_trail(app):
     for rule in app.url_map.iter_rules():
         if rule.rule.startswith("/audit"):
             assert not ({"PUT", "PATCH", "DELETE"} & rule.methods), rule.rule
-<<<<<<< HEAD
 
 # --- KE06 ---
 
@@ -479,5 +462,3 @@ def test_the_audit_page_is_for_auditors_only(app):
     login(citizen, "carl", "Correct-Horse-42")
     assert citizen.get("/audit").headers["Location"].endswith("/dashboard")
     assert 'href="/audit"' not in citizen.get("/dashboard").get_data(as_text=True)
-=======
->>>>>>> origin/election-voting-v2

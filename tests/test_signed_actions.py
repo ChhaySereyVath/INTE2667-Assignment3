@@ -68,3 +68,41 @@ def test_signed_records_cannot_be_changed_in_the_database(app):
     with app.app_context():
         with pytest.raises(IntegrityError), db.engine.begin() as connection:
             connection.exec_driver_sql("UPDATE signed_actions SET outcome = 'denied'")
+
+# --- KE16 ---
+
+def add_fresh_mfa_route(app):
+    from flask import jsonify
+
+    from app.security.shared_security import permission_required
+    from app.security.signed_actions import recent_mfa_required
+
+    @app.route("/t/fresh", methods=["POST"])
+    @permission_required("candidate:manage")
+    @recent_mfa_required
+    def t_fresh(current_user):
+        return jsonify({"ok": True})
+
+
+def test_signing_needs_a_recent_security_key_check(app):
+    add_fresh_mfa_route(app)
+    dana = delegate_client(app)  # passed MFA just now
+    assert dana.post("/t/fresh", headers=csrf_headers(dana)).status_code == 200
+    clock.freeze(utcnow() + timedelta(minutes=11))
+    try:
+        stale = dana.post("/t/fresh", headers=csrf_headers(dana))
+    finally:
+        clock.unfreeze()
+    # the session is still alive (inside the 15-minute idle limit), but the MFA is 11 minutes old
+    assert stale.status_code == 401 and stale.get_json()["reauthenticate"] is True
+
+
+def test_a_password_only_session_cannot_sign_anything(app):
+    from tests.test_auth_login import login, make_user
+
+    add_fresh_mfa_route(app)
+    with app.app_context():
+        make_user(username="dana2", role="commissioner_delegate")
+    client = app.test_client()
+    login(client, "dana2", "Correct-Horse-42")  # no MFA
+    assert client.post("/t/fresh", headers=csrf_headers(client)).status_code == 403
