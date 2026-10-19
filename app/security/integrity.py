@@ -52,3 +52,35 @@ def seal_contest(contest):
     seal.signature = sign(seal.signed_fields(), EVIDENCE_KEY)
     db.session.add(seal)
     return seal
+
+def verify_contest(contest):
+    """Every check R19 needs. Returns a list of problems; empty means safe to count."""
+    from app.models.results_models import BallotSeal
+    from app.security.voting_security import read_preferences
+
+    public = public_key_hex(EVIDENCE_KEY)
+    problems = []
+    seal = db.session.get(BallotSeal, contest.id)
+    if seal is None:
+        return ["the contest has no seal (polling has not closed, or the seal was removed)"]
+    if not verify(seal.signed_fields(), seal.signature, public):
+        problems.append("the seal's signature is invalid")
+
+    ballots = Ballot.query.filter_by(contest_id=contest.id).order_by(Ballot.id).all()
+    for ballot in ballots:
+        if not ballot.signature or not verify({"ballot": ballot_digest(ballot)}, ballot.signature, public):
+            problems.append(f"ballot {ballot.id[:8]} is not signed correctly")
+            continue
+        try:
+            read_preferences(ballot)  # the AES-GCM tag also detects any change
+        except ValueError:
+            problems.append(f"ballot {ballot.id[:8]} cannot be decrypted")
+
+    if len(ballots) != seal.ballot_count:
+        problems.append(f"{len(ballots)} ballots, but the seal says {seal.ballot_count}")
+    if merkle_root([ballot_digest(b) for b in ballots]) != seal.merkle_root:
+        problems.append("the ballots no longer match the seal")
+    used = VoteEntitlement.query.filter_by(contest_id=contest.id, status="used").count()
+    if used != len(ballots):
+        problems.append(f"{len(ballots)} ballots, but {used} voters are marked as voted")
+    return problems

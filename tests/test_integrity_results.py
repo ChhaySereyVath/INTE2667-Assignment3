@@ -100,3 +100,54 @@ def test_the_database_refuses_to_change_ballots_or_seals(app):
             with pytest.raises(IntegrityError), db.engine.begin() as connection:
                 connection.exec_driver_sql(statement)
         assert Ballot.query.count() == 3
+
+# --- KE23 ---
+
+def test_untouched_ballots_verify(app):
+    _, contest_id = closed_election(app)
+    assert problems(app, contest_id) == []
+
+
+def test_an_altered_ballot_is_detected(app):
+    _, contest_id = closed_election(app)
+    as_dba(app, "UPDATE ballots SET preferences_enc = preferences_enc || 'x' "
+                "WHERE id = (SELECT MIN(id) FROM ballots)")
+    found = problems(app, contest_id)
+    assert any("is not signed correctly" in p for p in found)
+    assert "the ballots no longer match the seal" in found
+
+
+def test_a_deleted_ballot_is_detected(app):
+    _, contest_id = closed_election(app)
+    as_dba(app, "DELETE FROM ballots WHERE id = (SELECT MIN(id) FROM ballots)")
+    found = problems(app, contest_id)
+    assert "2 ballots, but the seal says 3" in found
+    assert "2 ballots, but 3 voters are marked as voted" in found
+
+
+def test_an_inserted_ballot_is_detected(app):
+    _, contest_id = closed_election(app)
+    with app.app_context():
+        election_id = db.session.get(Contest, contest_id).election_id
+    as_dba(app, f"INSERT INTO ballots (id, election_id, contest_id, preferences_enc, signature) "
+                f"VALUES ('ffffffff-0000-4000-8000-000000000000', '{election_id}', '{contest_id}', 'forged', '00')")
+    found = problems(app, contest_id)
+    assert "ballot ffffffff is not signed correctly" in found
+    assert "4 ballots, but the seal says 3" in found
+
+
+def test_a_ballot_copied_onto_another_row_is_detected(app):
+    """Copying one voter's encrypted ballot over another's: the AAD and the signature
+    are both tied to the row's id, so the copy is caught."""
+    _, contest_id = closed_election(app)
+    as_dba(app, "UPDATE ballots SET preferences_enc = (SELECT preferences_enc FROM ballots ORDER BY id LIMIT 1), "
+                "signature = (SELECT signature FROM ballots ORDER BY id LIMIT 1) "
+                "WHERE id = (SELECT MAX(id) FROM ballots)")
+    found = problems(app, contest_id)
+    assert any("is not signed correctly" in p for p in found)
+
+
+def test_a_forged_seal_is_detected(app):
+    _, contest_id = closed_election(app)
+    as_dba(app, f"UPDATE ballot_seals SET ballot_count = 4 WHERE contest_id = '{contest_id}'")
+    assert "the seal's signature is invalid" in problems(app, contest_id)
