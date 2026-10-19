@@ -188,3 +188,44 @@ def test_no_count_before_polling_closes(app):
     clock.unfreeze()
     dana = delegate_client(app)
     assert count(dana, contest_of(app, election_id, "house")).status_code == 409
+
+# --- KE25 ---
+
+def test_a_second_delegate_approves_and_the_approval_is_signed(app):
+    _, contest_id = closed_election(app)
+    dana = delegate_client(app)
+    run_id = count(dana, contest_id).get_json()["count_run"]["id"]
+    own = dana.post(f"/count-runs/{run_id}/approve", headers=csrf_headers(dana))
+    assert own.status_code == 403  # separation of duties
+    vic2 = delegate_client(app, "victor.vic")
+    approved = vic2.post(f"/count-runs/{run_id}/approve", headers=csrf_headers(vic2))
+    assert approved.status_code == 200 and approved.get_json()["count_run"]["approved"] is True
+    from tests.test_signed_actions import signed
+
+    approvals = [r for r in signed(app) if r["action"] == "result_approve"]
+    assert [r["outcome"] for r in approvals] == ["denied", "success"]
+
+
+def test_a_failed_count_can_never_be_approved(app):
+    _, contest_id = closed_election(app)
+    as_dba(app, "DELETE FROM ballots WHERE id = (SELECT MIN(id) FROM ballots)")
+    dana = delegate_client(app)
+    run_id = count(dana, contest_id).get_json()["count_run"]["id"]
+    vic2 = delegate_client(app, "victor.vic")
+    assert vic2.post(f"/count-runs/{run_id}/approve", headers=csrf_headers(vic2)).status_code == 409
+
+
+def test_published_results_show_only_approved_counts(app):
+    election_id, contest_id = closed_election(app)
+    dana = delegate_client(app)
+    run_id = count(dana, contest_id).get_json()["count_run"]["id"]
+    public = app.test_client()
+    assert public.get(f"/results/{election_id}").status_code == 404  # not published yet
+    vic2 = delegate_client(app, "victor.vic")
+    vic2.post(f"/count-runs/{run_id}/approve", headers=csrf_headers(vic2))
+    dana.post(f"/elections/{election_id}/status", headers=csrf_headers(dana),
+              json={"status": "results_published"})
+    body = public.get(f"/results/{election_id}").get_json()
+    (house,) = body["contests"]
+    assert house["elected"] == ["Avery Lin"] and house["ballots"] == 3
+    assert house["first_preferences"] == {"Avery Lin": 2, "Blake Okafor": 1, "Casey Nguyen": 0}

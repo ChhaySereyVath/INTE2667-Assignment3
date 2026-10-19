@@ -51,3 +51,30 @@ def list_runs(current_user, contest_id):
         return jsonify({"error": "Not found"}), 404
     runs = CountRun.query.filter_by(contest_id=contest.id).order_by(CountRun.created_at.desc()).all()
     return jsonify({"count_runs": [r.to_dict() for r in runs]}), 200
+
+@results_bp.route("/count-runs/<run_id>/approve", methods=["POST"])
+@permission_required("result:approve")
+@recent_mfa_required
+def approve(current_user, run_id):
+    from app.security.results_security import approve_result
+
+    run = db.session.get(CountRun, run_id)
+    if run is None or _contest_in_scope(current_user, run.contest_id) is None:
+        return jsonify({"error": "Not found"}), 404
+    outcome = approve_result(run, current_user)
+    db.session.commit()
+    if outcome != "approved":
+        message, code = APPROVAL_REFUSALS[outcome]
+        return jsonify({"error": message}), code
+    return jsonify({"count_run": run.to_dict()}), 200
+
+
+@results_bp.route("/results/<election_id>", methods=["GET"])
+def public_results(election_id):
+    """Public: approved results of a PUBLISHED election. Nothing before that."""
+    from app.security.results_security import published_results
+
+    election = db.session.get(Election, election_id)
+    if election is None or election.status != "results_published":
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"election": election.name, "contests": published_results(election)}), 200

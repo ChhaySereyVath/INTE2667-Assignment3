@@ -46,3 +46,46 @@ def run_count(contest, actor):
                          {"run_id": run.id, "status": run.status, "elected": result["elected"],
                           "excluded": excluded}, "success")
     return run
+
+def approve_result(run, actor):
+    """R15: approving a result is signed, and needs a SECOND delegate.
+
+    Returns "approved", or why it was refused (the refusal is signed too).
+    """
+    reason = None
+    if run.status != "completed":
+        reason = "integrity_failed"  # R19: a failed count is never released
+    elif run.run_by == actor.id:
+        reason = "own_count"  # separation of duties: you cannot approve your own count
+    elif CountRun.query.filter(CountRun.contest_id == run.contest_id,
+                               CountRun.approved_by.isnot(None)).first():
+        reason = "already_approved"
+    if reason:
+        record_signed_action(actor, "result_approve", "count_run", run.id, {"reason": reason}, "denied")
+        return reason
+    run.approved_by, run.approved_at = actor.id, utcnow()
+    record_signed_action(actor, "result_approve", "count_run", run.id,
+                         {"elected": json.loads(run.result)["elected"]}, "success")
+    return "approved"
+
+
+def published_results(election):
+    """Approved results only, and only once the election is published. Candidate ids
+    are swapped for names: this is what the public sees."""
+    names = {}
+    contests = []
+    for contest in election.contests:
+        run = CountRun.query.filter(CountRun.contest_id == contest.id,
+                                    CountRun.approved_by.isnot(None)).first()
+        if run is None:
+            continue
+        names.update({c.id: c.name for c in contest.candidates})
+        result = json.loads(run.result)
+        contests.append({
+            "contest_type": contest.contest_type,
+            "state": contest.state,
+            "elected": [names[c] for c in result["elected"]],
+            "first_preferences": {names[c]: votes for c, votes in result["rounds"][0].items()},
+            "ballots": result["ballots"],
+        })
+    return contests
