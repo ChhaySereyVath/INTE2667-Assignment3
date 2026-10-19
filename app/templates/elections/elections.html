@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Elections - AEC Voting Platform{% endblock %}
+{% block content %}
+<div id="notice" class="notice" hidden></div>
+<ul id="field-errors" class="field-errors" hidden></ul>
+
+<section class="card">
+  <h1>Elections</h1>
+  <p class="muted">Each step of an election is one button. The server refuses any step out of order.</p>
+  <div class="table-wrap">
+    <table id="elections" hidden>
+      <thead><tr><th>Name</th><th>Status</th><th>Polling opens (UTC)</th><th>Next step</th></tr></thead>
+      <tbody id="election-rows"></tbody>
+    </table>
+  </div>
+  <p id="elections-empty" class="muted" hidden>No elections yet.</p>
+</section>
+
+<section class="card">
+  <h2>New election</h2>
+  <form id="election-form">
+    <label for="election_name">Name</label>
+    <input type="text" id="election_name" minlength="3" maxlength="100" required>
+    <label for="polling_opens_at">Polling opens (UTC)</label>
+    <input type="datetime-local" id="polling_opens_at" step="1" required>
+    <label for="polling_closes_at">Polling closes (UTC)</label>
+    <input type="datetime-local" id="polling_closes_at" step="1" required>
+    <button type="submit" class="button">Create election</button>
+  </form>
+</section>
+<button type="button" class="button secondary" id="logout-button">Log out</button>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/elections.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}

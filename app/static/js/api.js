@@ -26,6 +26,11 @@ async function apiRequest(path, options = {}) {
   } catch (error) {
     data = {};
   }
+  if (response.status === 429) {
+    // R06: say how long to wait, using the Retry-After header the server sends
+    const wait = parseInt(response.headers.get("Retry-After") || "60", 10);
+    data.error = "Too many requests. Please wait " + wait + " seconds and try again.";
+  }
   return { ok: response.ok, status: response.status, data: data };
 }
 

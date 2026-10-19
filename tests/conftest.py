@@ -18,6 +18,7 @@ def make_test_config(**overrides):
         "JWT_SECRET_KEY": secrets.token_hex(32),
         "DATA_ENC_KEY": secrets.token_hex(32),
         "BLIND_INDEX_KEY": secrets.token_hex(32),
+        "BALLOT_KEY": secrets.token_hex(32),
         "BACKUP_KEY": secrets.token_hex(32),
         "WEBAUTHN_ORIGIN": "http://localhost:5000",  # tests never depend on your .env
         "AUDIT_SIGNING_KEY": secrets.token_hex(32),
@@ -26,6 +27,8 @@ def make_test_config(**overrides):
         "AUDIT_ANCHOR_FILE": str(Path(tempfile.mkdtemp()) / "audit-anchors.jsonl"),
         "SQLALCHEMY_DATABASE_URI": "sqlite://",  # in memory: nothing is written to disk
         "PREFERRED_URL_SCHEME": "https",  # the test client uses https, so Secure cookies work
+        # R06 limits would trip tests that log in many times; Yufei's tests turn them on
+        "RATELIMIT_ENABLED": False,
     }
     config.update(overrides)
     return config

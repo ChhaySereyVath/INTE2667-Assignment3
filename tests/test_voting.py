@@ -1,0 +1,405 @@
+"""R16 eligibility, R17 one vote per contest, R18 ballot secrecy (Yufei)."""
+import json
+import uuid
+from datetime import datetime
+
+from app import db
+from app.models.election_models import Election
+from app.models.enrollment_models import Enrolment
+from app.models.voting_models import VoteEntitlement
+from app.security.election_security import change_election_status
+from app.security.enrollment_security import identity_key
+from app.security.shared_security import clock
+from tests.conftest import csrf_headers
+from tests.test_auth_login import login, make_user
+from tests.test_elections import candidate_ids, contest_of, make_election
+
+DURING_POLLING = datetime(2026, 5, 2, 12, 0, 0)
+
+
+def approved_voter(app, username="alice", state="VIC", date_of_birth="1990-04-12"):
+    """A citizen with an APPROVED enrolment (Austin's model), signed in. Returns the client."""
+    with app.app_context():
+        user = make_user(username=username)
+        enrolment = Enrolment(id=str(uuid.uuid4()), user_id=user.id, state=state, status="approved",
+                              identity_bidx=identity_key(username, "Voter", date_of_birth))
+        for field, value in (("given_name", username), ("family_name", "Voter"),
+                             ("date_of_birth", date_of_birth), ("address_line", "1 Test Street"),
+                             ("suburb", "Carlton"), ("postcode", "3053")):
+            enrolment.set_field(field, value)
+        db.session.add(enrolment)
+        db.session.commit()
+    client = app.test_client()
+    login(client, username, "Correct-Horse-42")
+    return client
+
+
+def open_polling(app, election_id):
+    with app.app_context():
+        election = db.session.get(Election, election_id)
+        delegate = make_user(username="opener", role="commissioner_delegate")
+        assert change_election_status(election, delegate, "polling_open")
+        db.session.commit()
+
+
+def polling_election(app, *voters):
+    """Voters enrolled first, then polling opens (the roll closes), clock in polling hours."""
+    election_id = make_election(app)
+    clients = [approved_voter(app, name) for name in voters]
+    open_polling(app, election_id)
+    clock.freeze(DURING_POLLING)
+    return election_id, clients
+
+
+def check(client, election_id, contest_type="house", **extra):
+    return client.post("/voting/eligibility", headers=csrf_headers(client),
+                       json=dict(election_id=election_id, contest_type=contest_type, **extra))
+
+
+def vote(client, app, election_id, contest_type="house", key=None, preferences=None):
+    contest_id = contest_of(app, election_id, contest_type)
+    headers = dict(csrf_headers(client), **{"Idempotency-Key": key or str(uuid.uuid4())})
+    return client.post("/voting/ballots", headers=headers, json={
+        "election_id": election_id, "contest_type": contest_type,
+        "preferences": preferences if preferences is not None else candidate_ids(app, contest_id)})
+
+
+def ballots(app):
+    from app.models.voting_models import Ballot
+
+    with app.app_context():
+        return Ballot.query.count()
+
+
+# --- Y09 ---
+
+def test_opening_polling_gives_each_enrolled_voter_one_entitlement_per_contest(app):
+    election_id = make_election(app)
+    approved_voter(app, "alice")
+    with app.app_context():
+        user = make_user(username="pending-person")
+        db.session.add(Enrolment(user_id=user.id, state="VIC", status="pending",
+                                 identity_bidx="x" * 64, given_name_enc="-", family_name_enc="-",
+                                 date_of_birth_enc="-", address_line_enc="-", suburb_enc="-",
+                                 postcode_enc="-"))
+        db.session.commit()
+    open_polling(app, election_id)
+    with app.app_context():
+        rows = VoteEntitlement.query.all()
+        assert sorted(r.contest_type for r in rows) == ["house", "senate"]  # alice only
+        assert {r.status for r in rows} == {"unused"}
+
+
+def test_the_database_allows_one_entitlement_per_contest(app):
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
+    election_id, _ = polling_election(app, "alice")
+    clock.unfreeze()
+    with app.app_context():
+        existing = VoteEntitlement.query.filter_by(contest_type="house").one()
+        db.session.add(VoteEntitlement(user_id=existing.user_id, election_id=election_id,
+                                       contest_id=existing.contest_id, contest_type="house"))
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+
+
+# --- Y10 ---
+
+def test_an_enrolled_adult_is_eligible_during_polling(app):
+    from app.models.user import User
+    from app.security.voting_security import check_eligibility
+
+    election_id, _ = polling_election(app, "alice")
+    try:
+        with app.app_context():
+            decision = check_eligibility(User.query.filter_by(username="alice").one(),
+                                         db.session.get(Election, election_id), "house")
+            assert decision.eligible and decision.reason == "eligible"
+    finally:
+        clock.unfreeze()
+
+
+def test_each_rule_gives_its_own_reason(app):
+    from app.models.user import User
+    from app.security.voting_security import check_eligibility
+
+    election_id = make_election(app)
+    approved_voter(app, "alice")
+    approved_voter(app, "teen", date_of_birth="2009-01-01")  # 17 on polling day
+    open_polling(app, election_id)
+    approved_voter(app, "late")  # enrolled after the roll closed
+    with app.app_context():
+        make_user(username="nobody")
+        election = db.session.get(Election, election_id)
+        person = {u.username: u for u in User.query.all()}
+        try:
+            clock.freeze(datetime(2026, 5, 2, 7, 0, 0))
+            assert check_eligibility(person["alice"], election, "house").reason == "outside_polling_hours"
+            clock.freeze(DURING_POLLING)
+            assert check_eligibility(person["nobody"], election, "house").reason == "not_enrolled"
+            assert check_eligibility(person["teen"], election, "house").reason == "under_18"
+            assert check_eligibility(person["late"], election, "house").reason == "not_on_roll_for_this_election"
+            election.status = "polling_closed"
+            assert check_eligibility(person["alice"], election, "house").reason == "polling_not_open"
+        finally:
+            clock.unfreeze()
+
+
+# --- Y11 ---
+
+def test_the_eligibility_endpoint_answers_and_records_the_decision(app):
+    from app.models.audit_models import AuditEvent
+
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        body = check(alice, election_id).get_json()
+        assert body["eligible"] is True and body["reason"] == "eligible"
+        with app.app_context():
+            event = AuditEvent.query.filter_by(action="eligibility_decision").one()
+            assert json.loads(event.details) == {"contest_type": "house", "reason": "eligible"}
+    finally:
+        clock.unfreeze()
+
+
+def test_a_client_cannot_declare_itself_eligible(app):
+    """R16: 'A client-supplied eligibility flag is not trusted.'"""
+    election_id = make_election(app)  # polling not even open
+    alice = approved_voter(app, "alice")
+    assert check(alice, election_id, eligible=True).status_code == 400
+    assert check(alice, election_id).get_json()["eligible"] is False
+
+
+def test_staff_cannot_use_the_voter_endpoints(app):
+    from tests.test_elections import delegate_client
+
+    election_id = make_election(app)
+    dana = delegate_client(app)
+    assert check(dana, election_id).status_code == 403
+
+
+# --- Y12 ---
+
+def test_a_ballot_row_has_nothing_that_identifies_the_voter(app):
+    """R18: 'Ballot records do not contain a direct voter identifier.'"""
+    from app.models.voting_models import Ballot
+
+    columns = {c.name for c in Ballot.__table__.columns}
+    assert columns == {"id", "election_id", "contest_id", "preferences_enc", "signature"}
+    for word in ("user", "voter", "session", "ip", "time", "seq", "created", "key"):
+        assert not any(word in column for column in columns), word
+
+
+# --- Y13 ---
+
+def test_a_voter_casts_one_ballot_per_contest(app):
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        first = vote(alice, app, election_id)
+        assert first.status_code == 201
+        assert first.get_json() == {"status": "accepted", "contest_type": "house"}
+        second = vote(alice, app, election_id)
+        assert second.status_code == 409  # R17: a second ballot is refused
+        assert ballots(app) == 1
+        # R17: 'A House ballot does not prevent the voter from submitting a separate Senate ballot.'
+        assert vote(alice, app, election_id, "senate").status_code == 201
+        assert ballots(app) == 2
+    finally:
+        clock.unfreeze()
+
+
+def test_the_ballot_and_the_used_entitlement_are_saved_together(app):
+    """R17: 'The accepted-vote state and used entitlement are updated atomically.'"""
+    from app.models.voting_models import Ballot
+    import pytest
+
+    from app.security import voting_security
+
+    election_id, (alice,) = polling_election(app, "alice")
+    original = voting_security.encrypt_field
+
+    def broken_encrypt(*args, **kwargs):
+        raise RuntimeError("simulated crash between the two writes")
+
+    voting_security.encrypt_field = broken_encrypt
+    try:
+        assert vote(alice, app, election_id).status_code == 500
+    finally:
+        voting_security.encrypt_field = original
+    try:
+        with app.app_context():
+            assert Ballot.query.count() == 0
+            assert VoteEntitlement.query.filter_by(status="used").count() == 0  # rolled back too
+        assert vote(alice, app, election_id).status_code == 201  # and they can still vote
+    finally:
+        clock.unfreeze()
+
+
+def test_preferences_are_encrypted(app):
+    from app.models.voting_models import Ballot
+
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        vote(alice, app, election_id)
+        with app.app_context():
+            ballot = Ballot.query.one()
+            for candidate in candidate_ids(app, ballot.contest_id):
+                assert candidate not in ballot.preferences_enc
+    finally:
+        clock.unfreeze()
+
+
+# --- Y14 ---
+
+def test_a_retry_with_the_same_key_does_not_vote_twice(app):
+    """R17: 'Retries and replayed requests do not create another vote.'"""
+    election_id, (alice,) = polling_election(app, "alice")
+    key = str(uuid.uuid4())
+    try:
+        assert vote(alice, app, election_id, key=key).status_code == 201
+        retry = vote(alice, app, election_id, key=key)
+        assert retry.status_code == 200
+        assert retry.get_json()["status"] == "already_accepted"
+        assert ballots(app) == 1
+    finally:
+        clock.unfreeze()
+
+
+def test_a_ballot_needs_an_idempotency_key(app):
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        response = alice.post("/voting/ballots", headers=csrf_headers(alice), json={
+            "election_id": election_id, "contest_type": "house", "preferences": []})
+        assert response.status_code == 400
+    finally:
+        clock.unfreeze()
+
+
+# --- Y15 ---
+
+def test_twenty_simultaneous_submissions_create_exactly_one_ballot(tmp_path):
+    """R17: 'Concurrent requests cannot create two accepted records.'
+
+    Uses a real database FILE, so twenty threads really do compete for it.
+    """
+    import threading
+
+    from app import create_app
+    from tests.conftest import make_test_config
+
+    app = create_app(make_test_config(SQLALCHEMY_DATABASE_URI=f"sqlite:///{tmp_path / 'race.db'}"))
+    election_id, (alice,) = polling_election(app, "alice")
+    contest_id = contest_of(app, election_id, "house")
+    preferences = candidate_ids(app, contest_id)
+    cookies = {name: alice.get_cookie(name).value for name in ("access_token_cookie", "csrf_access_token")}
+    results = []
+
+    def submit():
+        client = app.test_client()
+        for name, value in cookies.items():
+            client.set_cookie(name, value)
+        response = client.post("/voting/ballots", json={
+            "election_id": election_id, "contest_type": "house", "preferences": preferences},
+            headers={"X-CSRF-TOKEN": cookies["csrf_access_token"], "Origin": "https://localhost",
+                     "Idempotency-Key": str(uuid.uuid4())})
+        results.append(response.status_code)
+
+    try:
+        threads = [threading.Thread(target=submit) for _ in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        clock.unfreeze()
+    assert results.count(201) == 1
+    assert ballots(app) == 1
+    with app.app_context():
+        assert VoteEntitlement.query.filter_by(status="used").count() == 1
+        db.session.remove()
+        db.engine.dispose()
+
+
+# --- Y16 ---
+
+def test_invalid_preferences_are_refused_and_nothing_is_used_up(app):
+    election_id, (alice,) = polling_election(app, "alice")
+    contest_id = contest_of(app, election_id, "house")
+    standing = candidate_ids(app, contest_id)
+    senate = candidate_ids(app, contest_of(app, election_id, "senate"))
+    try:
+        for preferences in ([], [standing[0], standing[0]], [str(uuid.uuid4())], [senate[0]],
+                            [1, 2], "not a list"):
+            response = vote(alice, app, election_id, preferences=preferences)
+            assert response.status_code == 400, preferences
+        with app.app_context():
+            assert VoteEntitlement.query.filter_by(status="used").count() == 0
+        assert vote(alice, app, election_id, preferences=standing[:1]).status_code == 201
+    finally:
+        clock.unfreeze()
+
+
+def test_an_ineligible_voter_is_refused_with_a_reason(app):
+    election_id = make_election(app)
+    alice = approved_voter(app, "alice")
+    response = vote(alice, app, election_id)
+    assert response.status_code == 403 and response.get_json()["reason"] == "polling_not_open"
+
+
+# --- Y17 ---
+
+def test_ballots_are_stored_without_a_hidden_arrival_order(app):
+    """R18: SQLite's hidden rowid would record arrival order; the table has none."""
+    with app.app_context(), db.engine.connect() as connection:
+        sql = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE name = 'ballots'").scalar()
+    assert "WITHOUT ROWID" in sql
+
+
+def test_nothing_links_a_voter_to_their_ballot(app):
+    """R18: 'Tests confirm that no common correlation token links the voter to the ballot.'"""
+    from app.models.voting_models import Ballot
+    from app.models.audit_models import AuditEvent
+    from app.models.auth_models import UserSession
+    from app.models.user import User
+
+    election_id, (alice,) = polling_election(app, "alice")
+    try:
+        response = vote(alice, app, election_id)
+    finally:
+        clock.unfreeze()
+    with app.app_context():
+        ballot = Ballot.query.one()
+        user = User.query.filter_by(username="alice").one()
+        voter_values = {user.id, user.username}
+        voter_values |= {s.id for s in UserSession.query.filter_by(user_id=user.id)}
+        voter_values |= {str(e.id) for e in VoteEntitlement.query.filter_by(user_id=user.id)}
+        voter_values |= {e.idempotency_key_hash for e in VoteEntitlement.query.filter_by(user_id=user.id)}
+        ballot_values = {ballot.id, ballot.preferences_enc, ballot.signature}
+        assert not (voter_values & ballot_values) - {None}
+        # the trail records that alice voted, but not which ballot is hers
+        trail = json.dumps([e.to_dict() for e in AuditEvent.query.all()])
+        assert ballot.id not in trail
+        entitlement = VoteEntitlement.query.filter_by(user_id=user.id, status="used").one()
+        assert entitlement.used_on.isoformat() == "2026-05-02"  # a date, never a time
+    assert ballot.id not in response.get_data(as_text=True)  # no receipt to sell or coerce
+
+
+def test_no_endpoint_hands_out_ballots(app):
+    for rule in app.url_map.iter_rules():
+        if "ballot" in rule.rule:
+            assert rule.methods & {"GET"} == set(), rule.rule
+
+
+# --- Y21 ---
+
+def test_the_voting_page_is_for_citizens(app):
+    from tests.test_auth_pages import INLINE_SCRIPT
+    from tests.test_elections import delegate_client
+
+    alice = approved_voter(app, "alice")
+    body = alice.get("/voting").get_data(as_text=True)
+    assert 'id="open-elections"' in body and INLINE_SCRIPT.search(body) is None
+    assert 'href="/voting"' in alice.get("/dashboard").get_data(as_text=True)
+    dana = delegate_client(app)
+    assert dana.get("/voting").headers["Location"].endswith("/dashboard")

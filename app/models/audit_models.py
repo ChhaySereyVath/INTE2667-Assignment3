@@ -1,3 +1,8 @@
+"""Audit trail, alerts and signed records (R13, R14, R15).
+
+Nothing here stores a password, token, key, name, address or ballot choice: rows hold
+ids, action names and outcomes only (R02, R13, R18).
+"""
 import uuid
 
 from app import db
@@ -69,7 +74,10 @@ class AuditHead(db.Model):
     seq = db.Column(db.Integer, nullable=False)
     record_hash = db.Column(db.String(64), nullable=False)
 
+
+# R14, R15, R19: tables the application only ever adds rows to
 APPEND_ONLY_TABLES = ("audit_events",)
+
 
 def protect_audit(engine):
     """R14/R15: the DATABASE refuses to change or delete audit and signed records.

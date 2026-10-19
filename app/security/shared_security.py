@@ -56,6 +56,8 @@ ROLE_PERMISSIONS = {
         "enrolment:self:read",
         "enrolment:self:enrol",
         "enrolment:self:update_address",
+        "eligibility:self:check",  # Yufei: R16
+        "ballot:submit",  # Yufei: R17
     }),
     "aec_employee": frozenset({
         "enrolment:staff:read",
@@ -66,6 +68,7 @@ ROLE_PERMISSIONS = {
         "enrolment:staff:register",
         "enrolment:staff:approve",
         "enrolment:history:read_sensitive",
+        "election:manage",  # Yufei: create elections, open and close polling
     }),
     "administrator": frozenset({
         "admin:user:create",
