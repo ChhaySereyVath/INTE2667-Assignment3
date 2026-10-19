@@ -196,3 +196,19 @@ def test_no_signing_key_is_in_the_source_code():
         text = path.read_text()
         assert not re.search(r"['\"][0-9a-f]{64}['\"]", text), path  # no hard-coded 32-byte key
         assert "PRIVATE KEY-----" not in text, path
+
+# --- KE20 ---
+
+def test_an_auditor_sees_every_signed_action_and_whether_it_verifies(app):
+    from tests.test_audit_log import auditor_client
+
+    election_id = make_election(app)
+    dana = delegate_client(app)
+    add(dana, contest_of(app, election_id, "house"))
+    auditor = auditor_client(app)
+    body = auditor.get("/audit/actions").get_json()
+    assert [a["verified"] for a in body["actions"]] == [True]
+    assert body["public_key"] and len(body["public_key"]) == 64
+    tamper(app, "UPDATE signed_actions SET outcome = 'denied'")
+    assert [a["verified"] for a in auditor.get("/audit/actions").get_json()["actions"]] == [False]
+    assert dana.get("/audit/actions").status_code == 403

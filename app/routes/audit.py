@@ -51,3 +51,19 @@ def audit_link():
     """Lets the dashboard show the Audit link to auditors without editing pages.py."""
     user = g.get("page_user")
     return {"can_audit": user is not None and has_permission(user, "audit:log:read")}
+
+@audit_bp.route("/audit/actions", methods=["GET"])
+@permission_required("audit:log:read")
+def list_signed_actions(current_user):
+    """R15: every signed privileged action, each checked against the public key."""
+    from app.models.audit_models import SignedAction
+    from app.security.signing import public_key_hex, verify
+
+    public = public_key_hex("ACTION_SIGNING_KEY")
+    rows = SignedAction.query.order_by(SignedAction.signed_at.desc()).limit(PAGE_SIZE).all()
+    actions = []
+    for row in rows:
+        data = row.to_dict()
+        data["verified"] = verify(row.signed_fields(), row.signature, public)
+        actions.append(data)
+    return jsonify({"actions": actions, "public_key": public}), 200
