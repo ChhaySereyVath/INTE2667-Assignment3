@@ -76,8 +76,7 @@ class AuditHead(db.Model):
 
 
 # R14, R15, R19: tables the application only ever adds rows to
-APPEND_ONLY_TABLES = ("audit_events", "signed_actions")
-
+APPEND_ONLY_TABLES = ("audit_events", "signed_actions", "ballots", "ballot_seals")
 
 def protect_audit(engine):
     """R14/R15: the DATABASE refuses to change or delete audit and signed records.

@@ -68,3 +68,35 @@ def test_every_accepted_ballot_is_signed(app):
     with app.app_context():
         ballot = Ballot.query.one()
         assert verify({"ballot": ballot_digest(ballot)}, ballot.signature, public_key_hex("AUDIT_SIGNING_KEY"))
+
+# --- KE22 ---
+
+def test_closing_polling_seals_every_contest(app):
+    from app.models.results_models import BallotSeal
+
+    _, contest_id = closed_election(app)
+    with app.app_context():
+        seal = db.session.get(BallotSeal, contest_id)
+        assert seal.ballot_count == 3
+        assert BallotSeal.query.count() == 16  # every contest, even those with no ballots
+
+
+def test_the_merkle_root_ignores_arrival_order_but_not_content():
+    from app.security.integrity import merkle_root
+
+    leaves = ["a" * 64, "b" * 64, "c" * 64]
+    assert merkle_root(leaves) == merkle_root(list(reversed(leaves)))  # R18: no order leak
+    assert merkle_root(leaves) != merkle_root(leaves[:2])
+    assert merkle_root(leaves) != merkle_root(leaves[:2] + ["d" * 64])
+
+
+def test_the_database_refuses_to_change_ballots_or_seals(app):
+    from sqlalchemy.exc import IntegrityError
+
+    _, contest_id = closed_election(app)
+    with app.app_context():
+        for statement in ("DELETE FROM ballots", "UPDATE ballots SET signature = '00'",
+                          f"UPDATE ballot_seals SET ballot_count = 0 WHERE contest_id = '{contest_id}'"):
+            with pytest.raises(IntegrityError), db.engine.begin() as connection:
+                connection.exec_driver_sql(statement)
+        assert Ballot.query.count() == 3

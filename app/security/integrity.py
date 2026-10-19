@@ -25,3 +25,30 @@ def ballot_digest(ballot):
 def sign_ballot(ballot):
     """Called as the ballot is accepted. The signature covers the digest above."""
     ballot.signature = sign({"ballot": ballot_digest(ballot)}, EVIDENCE_KEY)
+
+def merkle_root(leaves):
+    """One hash that changes if any leaf changes, is removed or is added.
+
+    The leaves are SORTED first: the root then depends only on which ballots exist,
+    not on the order they arrived in, so the seal reveals nothing about timing (R18).
+    """
+    level = sorted(leaves) or [hashlib.sha256(b"").hexdigest()]
+    while len(level) > 1:
+        if len(level) % 2:
+            level.append(level[-1])
+        level = [hashlib.sha256((level[i] + level[i + 1]).encode("utf-8")).hexdigest()
+                 for i in range(0, len(level), 2)]
+    return level[0]
+
+
+def seal_contest(contest):
+    """Seal one contest's ballots. Called once, when polling closes."""
+    from app.models.results_models import BallotSeal
+
+    ballots = Ballot.query.filter_by(contest_id=contest.id).all()
+    seal = BallotSeal(contest_id=contest.id, ballot_count=len(ballots),
+                      merkle_root=merkle_root([ballot_digest(b) for b in ballots]),
+                      sealed_at=utcnow())
+    seal.signature = sign(seal.signed_fields(), EVIDENCE_KEY)
+    db.session.add(seal)
+    return seal
