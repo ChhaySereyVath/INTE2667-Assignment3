@@ -320,3 +320,17 @@ def test_the_dashboard_links_each_role_to_its_own_page(app):
     admin = admin_client(app)
     body = admin.get("/dashboard").get_data(as_text=True)
     assert 'href="/admin"' in body and 'href="/my-enrolment"' not in body
+
+# --- the reset applies every password rule ---
+
+def test_a_reset_password_cannot_contain_the_username(app, client):
+    """R09: the same rules as at registration, including 'must not contain your
+    username', and a refused password does not use up the link."""
+    make_account(app)
+    ask(client)
+    confirm(client, latest_token(app, "recovery"))
+    token = latest_token(app, "recovery_reset")
+    refused = reset(client, token, password="alice-Horse-Battery-9")
+    assert refused.status_code == 400
+    assert refused.get_json()["fields"] == {"new_password": "must not contain your username"}
+    assert reset(client, token).status_code == 200  # the same link still works

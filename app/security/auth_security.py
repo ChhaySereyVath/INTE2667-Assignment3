@@ -118,6 +118,16 @@ def issue_token(user, purpose, hours):
     db.session.commit()
     return raw
 
+def peek_token(raw, purpose):
+    """Return the token's user if it is valid, WITHOUT using it up. For checks that
+    must happen before the link is spent (a rejected password must not burn it)."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    row = AuthToken.query.filter_by(token_hash=_hash_token(raw), purpose=purpose).first()
+    if row is None or row.used_at is not None or row.expires_at <= utcnow():
+        return None
+    return db.session.get(User, row.user_id)
+
 def redeem_token(raw, purpose):
     """Return the token's user if it is valid, then mark it used. None otherwise."""
     if not isinstance(raw, str) or not raw:
