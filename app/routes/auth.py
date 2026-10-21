@@ -6,7 +6,7 @@ from flask_jwt_extended import set_access_cookies, unset_jwt_cookies
 from app import db
 from app.models.user import User
 from app.security.auth_security import (authenticate, clear_login_failures, create_staff_account,
-                                        login_is_locked, password_problem, queue_notification,
+                                        login_is_locked, normalize_username, password_problem, queue_notification,
                                         record_login_failure, redeem_token, register_account,
                                         revoke_all_sessions, rotate_session, start_session)
 from app.security.mfa_security import (authentication_options, finish_authentication,
@@ -23,7 +23,7 @@ INVALID_CREDENTIALS = "Invalid credentials"
 def _audit_login(action, result, username):
     """R13: record a login attempt by account id only. An unknown username is NOT
     stored: people sometimes type their password into the username box."""
-    user = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(username=normalize_username(username)).first()
     append_event(action, result, actor=user, target_type="account",
                  target_id=user.id if user else None)
     db.session.commit()
@@ -50,7 +50,7 @@ def login():
     ok, data, _ = validate(request.get_json(silent=True), LOGIN_SCHEMA)
     if not ok:
         return jsonify({"error": "Invalid request"}), 400
-    username, password = data["username"], data["password"]
+    username, password = normalize_username(data["username"]), data["password"]
     client_ip = request.remote_addr or "unknown"
 
     # R09: too many wrong passwords from this computer, or against this account
