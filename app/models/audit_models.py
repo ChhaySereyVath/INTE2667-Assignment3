@@ -76,8 +76,7 @@ class AuditHead(db.Model):
 
 
 # R14, R15, R19: tables the application only ever adds rows to
-APPEND_ONLY_TABLES = ("audit_events",)
-
+APPEND_ONLY_TABLES = ("audit_events", "signed_actions", "ballots", "ballot_seals")
 
 def protect_audit(engine):
     """R14/R15: the DATABASE refuses to change or delete audit and signed records.
@@ -102,3 +101,54 @@ def protect_audit(engine):
     with engine.begin() as connection:
         for statement in statements:
             connection.exec_driver_sql(statement)
+
+class SecurityAlert(db.Model):
+    """R14: raised when verification finds the audit trail (or other evidence) altered."""
+
+    __tablename__ = "security_alerts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(40), nullable=False)
+    message = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+class SignedAction(db.Model):
+    """R15: a privileged action, bound to the verified person who did it and signed by
+    the server, so it can be checked later without trusting the database."""
+
+    __tablename__ = "signed_actions"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    actor_id = db.Column(db.String(36), nullable=False)
+    actor_role = db.Column(db.String(30), nullable=False)
+    session_id = db.Column(db.String(36), nullable=False)
+    action = db.Column(db.String(40), nullable=False)
+    target_type = db.Column(db.String(30), nullable=False)
+    target_id = db.Column(db.String(64))
+    payload = db.Column(db.Text, nullable=False)  # canonical JSON
+    outcome = db.Column(db.String(10), nullable=False)
+    signed_at = db.Column(db.DateTime, nullable=False)
+    signature = db.Column(db.String(128), nullable=False)  # Ed25519, hex
+
+    def signed_fields(self):
+        """Exactly what the signature covers. Changing any of these breaks it."""
+        return {
+            "id": self.id,
+            "actor_id": self.actor_id,
+            "actor_role": self.actor_role,
+            "session_id": self.session_id,
+            "action": self.action,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "payload": self.payload,
+            "outcome": self.outcome,
+            "signed_at": self.signed_at.isoformat(),
+        }
+
+    def to_dict(self):
+        import json
+
+        data = self.signed_fields()
+        data["payload"] = json.loads(self.payload)
+        data["signature"] = self.signature
+        return data

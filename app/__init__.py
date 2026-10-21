@@ -13,6 +13,7 @@ jwt = JWTManager()
 
 # S13: the app refuses to start without these. There are no default values.
 REQUIRED_SECRETS = ("SECRET_KEY", "JWT_SECRET_KEY", "DATA_ENC_KEY", "BLIND_INDEX_KEY")
+REQUIRED_SECRETS += ("AUDIT_SIGNING_KEY", "ACTION_SIGNING_KEY")  # Keane: R14, R15, R19 signatures
 REQUIRED_SECRETS += ("BALLOT_KEY",)  # Yufei: R01 encryption of ballot preferences
 
 
@@ -65,6 +66,8 @@ def create_app(test_config=None):
         BACKUP_RETENTION_DAYS=90,
         RESTORE_REPORT_DIR="docs/restore-reports",
         BACKUP_KEY=os.environ.get("BACKUP_KEY"),
+        # R14: signed anchors of the audit trail live OUTSIDE the database
+        AUDIT_ANCHOR_FILE="anchors/audit-anchors.jsonl",
         # R06: Flask-Limiter reads this. Tests switch it off unless they test R06.
         RATELIMIT_ENABLED=True,
     )
@@ -80,6 +83,9 @@ def create_app(test_config=None):
 
     db.init_app(app)
     jwt.init_app(app)
+    from app.security.redaction import install_redaction
+    install_redaction(app)
+
     from app.security.shared_security import register_security
     register_security(app) # S03: shared error handlers and security headers
 
@@ -117,6 +123,13 @@ def create_app(test_config=None):
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
 
+    from app.security.audit_security import audit_anchor_command, audit_verify_command
+    app.cli.add_command(audit_anchor_command)
+    app.cli.add_command(audit_verify_command)
+
+    from app.security.signed_actions import verify_actions_command
+    app.cli.add_command(verify_actions_command)
+
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
@@ -125,12 +138,21 @@ def create_app(test_config=None):
     app.register_blueprint(enrollment_bp, url_prefix="/enrollment")
     app.register_blueprint(enrollment_pages_bp)
 
+    from app.routes.audit import audit_bp
+    app.register_blueprint(audit_bp)
+    
     from app.routes.elections import elections_bp
     app.register_blueprint(elections_bp)
 
     from app.routes.voting import voting_bp
     app.register_blueprint(voting_bp)
 
+    from app.routes.candidates import candidates_bp
+    app.register_blueprint(candidates_bp)
+
+    from app.routes.results import results_bp
+    app.register_blueprint(results_bp)
+    
     from app.routes.pages import pages_bp
     app.register_blueprint(pages_bp)
 
@@ -148,5 +170,3 @@ def create_app(test_config=None):
         protect_audit(db.engine)
 
     return app
-
-

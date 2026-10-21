@@ -70,7 +70,6 @@ def append_event(action, result, actor=None, target_type=None, target_id=None, *
     db.session.flush()  # the next append in this request sees this one
     return event
 
-
 # R13: the only detail keys an event may carry. Anything else is dropped before it is
 # stored, so a password, token, key or ballot choice can never end up in the trail,
 # even if a caller passes one by mistake.
@@ -93,7 +92,6 @@ def clean_details(details):
         else:
             cleaned[key] = str(value)[:MAX_DETAIL_LENGTH]
     return cleaned
-
 
 def chain_problems(events, head):
     """R14: recompute a chain. `events` in seq order; `head` is the end marker row.
@@ -118,3 +116,101 @@ def chain_problems(events, head):
 def verify_chain():
     """R14: check the live trail."""
     return chain_problems(AuditEvent.query.order_by(AuditEvent.seq).all(), db.session.get(AuditHead, 1))
+
+# --- signed anchors, kept outside the database --------------------------------
+
+def _anchor_file():
+    return Path(current_app.config["AUDIT_ANCHOR_FILE"])
+
+
+def write_anchor():
+    """R14: sign the current end of the chain and append it to the anchor file.
+
+    The file lives outside the database, and only the holder of AUDIT_SIGNING_KEY can
+    write a valid line, so someone who can edit the database still cannot make the
+    anchors agree with a rewritten chain. Returns the anchor, or None if no events.
+    """
+    from app.security.signing import sign
+
+    last = AuditEvent.query.order_by(AuditEvent.seq.desc()).first()
+    if last is None:
+        return None
+    anchor = {"seq": last.seq, "record_hash": last.record_hash, "anchored_at": utcnow().isoformat()}
+    anchor["signature"] = sign(anchor, "AUDIT_SIGNING_KEY")
+    path = _anchor_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(anchor) + "\n")
+    return anchor
+
+
+def verify_anchors():
+    """R14: every anchor must carry a valid signature AND still match the database."""
+    from app.security.signing import public_key_hex, verify
+
+    path = _anchor_file()
+    if not path.exists():
+        return []
+    public = public_key_hex("AUDIT_SIGNING_KEY")
+    problems = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        try:
+            anchor = json.loads(line)
+            signature = anchor.pop("signature")
+        except (ValueError, KeyError, AttributeError):
+            problems.append(f"anchor {number} is unreadable")
+            continue
+        if not verify(anchor, signature, public):
+            problems.append(f"anchor {number} has an invalid signature")
+            continue
+        event = db.session.get(AuditEvent, anchor["seq"])
+        if event is None:
+            problems.append(f"anchor {number}: event {anchor['seq']} is gone")
+        elif event.record_hash != anchor["record_hash"]:
+            problems.append(f"anchor {number}: event {anchor['seq']} no longer matches")
+    return problems
+
+# --- alerts -----------------------------------------------------------------
+
+security_log = logging.getLogger("evp.security")
+
+
+def raise_alert(kind, message):
+    """R14: a failed verification must not pass quietly. It is stored, logged as
+    CRITICAL (where monitoring picks it up), and written to the trail itself."""
+    from app.models.audit_models import SecurityAlert
+
+    db.session.add(SecurityAlert(kind=kind, message=message[:200]))
+    security_log.critical("security_alert kind=%s message=%s", kind, message[:200])
+
+
+def verify_audit_trail(actor=None):
+    """Check the chain and the anchors. On any problem, raise an alert. Returns problems."""
+    problems = verify_chain() + verify_anchors()
+    if problems:
+        raise_alert("audit_tampering", f"{len(problems)} problem(s): {problems[0]}")
+        append_event("audit_verify_failed", "failure", actor, problems=len(problems))
+    else:
+        append_event("audit_verified", "success", actor)
+    db.session.commit()
+    return problems
+
+
+@click.command("audit-anchor")
+@with_appcontext
+def audit_anchor_command():
+    """Sign the end of the audit trail into the anchor file (run every few minutes)."""
+    anchor = write_anchor()
+    click.echo(f"Anchored event {anchor['seq']}." if anchor else "No events yet.")
+
+
+@click.command("audit-verify")
+@with_appcontext
+def audit_verify_command():
+    """Check the audit trail against its hashes and anchors."""
+    problems = verify_audit_trail()
+    if problems:
+        for problem in problems:
+            click.echo(f"FAIL: {problem}")
+        raise SystemExit(1)
+    click.echo("Audit trail intact.")

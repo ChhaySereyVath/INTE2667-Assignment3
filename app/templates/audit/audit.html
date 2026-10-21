@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Audit trail - AEC Voting Platform{% endblock %}
+{% block content %}
+<div id="notice" class="notice" hidden></div>
+
+<section class="card">
+  <h1>Audit trail</h1>
+  <p class="muted">Every security and administrative event, newest first. Nothing here can be
+     edited or deleted.</p>
+  <button type="button" class="button" id="verify-button">Verify integrity</button>
+  <p id="verify-result" class="muted"></p>
+</section>
+
+<section class="card">
+  <label for="action-filter">Show</label>
+  <select id="action-filter">
+    <option value="">All events</option>
+    {% for action in actions %}<option value="{{ action }}">{{ action }}</option>{% endfor %}
+  </select>
+  <div class="table-wrap">
+    <table id="events">
+      <thead><tr><th>#</th><th>When (UTC)</th><th>Action</th><th>Result</th><th>Actor</th><th>Target</th></tr></thead>
+      <tbody id="event-rows"></tbody>
+    </table>
+  </div>
+  <p id="events-empty" class="muted" hidden>No events.</p>
+</section>
+<button type="button" class="button secondary" id="logout-button">Log out</button>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/audit.js') }}"></script>
+<script src="{{ url_for('static', filename='js/session.js') }}"></script>
+{% endblock %}

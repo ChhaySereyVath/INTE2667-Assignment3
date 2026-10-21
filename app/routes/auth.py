@@ -1,11 +1,12 @@
 """Authentication endpoints: /auth/... (R09, R21; later R08, R10, R12)."""
+from app.security.audit_security import append_event
 from flask import Blueprint, g, jsonify, request
 from flask_jwt_extended import set_access_cookies, unset_jwt_cookies
 
 from app import db
 from app.models.user import User
 from app.security.auth_security import (authenticate, clear_login_failures, create_staff_account,
-                                        login_is_locked, password_problem, queue_notification,
+                                        login_is_locked, normalize_username, password_problem, queue_notification,
                                         record_login_failure, redeem_token, register_account,
                                         revoke_all_sessions, rotate_session, start_session)
 from app.security.mfa_security import (authentication_options, finish_authentication,
@@ -18,6 +19,14 @@ from app.models.user import User
 auth_bp = Blueprint("auth", __name__)
 
 INVALID_CREDENTIALS = "Invalid credentials"
+
+def _audit_login(action, result, username):
+    """R13: record a login attempt by account id only. An unknown username is NOT
+    stored: people sometimes type their password into the username box."""
+    user = User.query.filter_by(username=normalize_username(username)).first()
+    append_event(action, result, actor=user, target_type="account",
+                 target_id=user.id if user else None)
+    db.session.commit()
 
 LOGIN_SCHEMA = {
     "username": {"type": str, "required": True, "max": 40},
@@ -41,11 +50,12 @@ def login():
     ok, data, _ = validate(request.get_json(silent=True), LOGIN_SCHEMA)
     if not ok:
         return jsonify({"error": "Invalid request"}), 400
-    username, password = data["username"], data["password"]
+    username, password = normalize_username(data["username"]), data["password"]
     client_ip = request.remote_addr or "unknown"
 
     # R09: too many wrong passwords from this computer, or against this account
     if login_is_locked(username, client_ip):
+        _audit_login("login_locked", "denied", username)
         response = jsonify({"error": "Too many requests"})
         response.headers["Retry-After"] = "900"
         return response, 429
@@ -53,8 +63,10 @@ def login():
     user = authenticate(username, password)
     if user is None:
         record_login_failure(username, client_ip)
+        _audit_login("login_failed", "failure", username)
         return jsonify({"error": INVALID_CREDENTIALS}), 401
     clear_login_failures(username, client_ip)
+    _audit_login("login_success", "success", username)
 
     token = start_session(user)
     response = jsonify({
@@ -79,6 +91,7 @@ def logout(current_user):
     """End the session on the server, not just in the browser (R21)."""
     g.current_session.revoked_at = utcnow()
     g.current_session.revoke_reason = "logout"
+    append_event("logout", "success", current_user, "account", current_user.id)
     db.session.commit()
     response = jsonify({"message": "Logged out"})
     unset_jwt_cookies(response)
@@ -150,6 +163,8 @@ def create_staff(current_user):
                                 data["role"], states, data["temporary_password"])
     if user is None:
         return jsonify({"error": "Invalid request"}), 400
+    append_event("staff_created", "success", current_user, "account", user.id, role=user.role)
+    db.session.commit()
     return jsonify({"message": "Staff account created", "user": user.to_dict()}), 201
 
 @auth_bp.route("/admin/roles", methods=["POST"])
@@ -172,6 +187,8 @@ def grant_role(current_user):
         return jsonify({"error": "Not found"}), 404
 
     previous, target.role = target.role, data["role"]
+    append_event("role_granted", "success", current_user, "account", target.id,
+                 previous_role=previous, new_role=target.role)
     db.session.commit()
     revoke_all_sessions(target, "role_changed")
     queue_notification(target, "role_changed", previous_role=previous, new_role=target.role)
@@ -251,6 +268,9 @@ def mfa_authenticate_finish(current_user):
         return refused
     credential = request.get_json(silent=True)
     if not isinstance(credential, dict) or not finish_authentication(current_user, g.current_session, credential):
+        append_event("mfa_failed", "failure", current_user, "account", current_user.id)
+        db.session.commit()
         return jsonify({"error": MFA_FAILED}), 400
+    append_event("mfa_success", "success", current_user, "account", current_user.id)
+    db.session.commit()
     return _mfa_passed_response("Security key accepted")
-

@@ -21,13 +21,18 @@ from app.security.shared_security import utcnow
 # as long as a wrong password and the timing doesn't reveal which accounts exist
 _DUMMY_HASH = bcrypt.hashpw(b"dummy-password-for-timing", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
 
+def normalize_username(username):
+    """R09: one account per name, whatever the capitals. 'Alice', 'alice' and
+    ' ALICE ' are the same username, so nobody can register a look-alike account and
+    nobody is locked out for typing a capital."""
+    return username.strip().lower()
 
 def authenticate(username, password):
     """Return the User if the username and password are right and the account is active.
 
     Returns None in every other case, so the caller can't tell WHY it failed (R09).
     """
-    user = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(username=normalize_username(username)).first()
     if user is None:
         bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
         return None
@@ -64,15 +69,15 @@ def start_session(user):
 @with_appcontext
 def create_user_command(username, role):
     """Create an active account for testing: flask create-user alice --role administrator"""
-    if User.query.filter_by(username=username).first():
+    if User.query.filter_by(username=normalize_username(username)).first():
         raise click.ClickException("That username is taken")
     # R09: the password is typed at a hidden prompt, never put on the command line
     password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
-    user = User(username=username, role=role, status="active")
+    user = User(username=normalize_username(username), role=role, status="active")
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
-    click.echo(f"Created {role} account '{username}'")
+    click.echo(f"Created {role} account '{normalize_username(username)}'")
 
 def queue_notification(user, template, **fields):
     """R09/R10: 'send' a message by writing a row. Keep PII out of the payload."""
@@ -86,14 +91,14 @@ def register_account(username, email, password):
     learn whether a username or address is already registered (R09).
     """
     email_key = blind_index(email)
-    taken = (User.query.filter_by(username=username).first()
+    taken = (User.query.filter_by(username=normalize_username(username)).first()
              or User.query.filter_by(email_bidx=email_key).first())
     if taken is not None:
         # the address is already in use: warn its owner instead of creating anything
         queue_notification(taken, "registration_attempt_existing")
         return
 
-    user = User(username=username, role="citizen", status="pending_activation", email_bidx=email_key)
+    user = User(username=normalize_username(username), role="citizen", status="pending_activation", email_bidx=email_key)
     user.set_password(password)
     db.session.add(user)
     db.session.flush()  # gives the row its id, which the encryption is bound to
@@ -117,6 +122,16 @@ def issue_token(user, purpose, hours):
     ))
     db.session.commit()
     return raw
+
+def peek_token(raw, purpose):
+    """Return the token's user if it is valid, WITHOUT using it up. For checks that
+    must happen before the link is spent (a rejected password must not burn it)."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    row = AuthToken.query.filter_by(token_hash=_hash_token(raw), purpose=purpose).first()
+    if row is None or row.used_at is not None or row.expires_at <= utcnow():
+        return None
+    return db.session.get(User, row.user_id)
 
 def redeem_token(raw, purpose):
     """Return the token's user if it is valid, then mark it used. None otherwise."""
@@ -262,11 +277,11 @@ def revoke_all_sessions(user, reason, except_session_id=None):
 def create_staff_account(created_by, username, email, role, states, temporary_password):
     """R12: only an administrator reaches this, and the new account starts pending."""
     email_key = blind_index(email)
-    if (User.query.filter_by(username=username).first()
+    if (User.query.filter_by(username=normalize_username(username)).first()
             or User.query.filter_by(email_bidx=email_key).first()):
         return None  # the caller answers with a generic error
 
-    user = User(username=username, role=role, status="pending_activation", email_bidx=email_key)
+    user = User(username=normalize_username(username), role=role, status="pending_activation", email_bidx=email_key)
     user.set_password(temporary_password)
     db.session.add(user)
     db.session.flush()

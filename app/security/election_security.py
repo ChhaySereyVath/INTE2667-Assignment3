@@ -36,6 +36,11 @@ def change_election_status(election, actor, new_status):
     previous, election.status = election.status, new_status
     if new_status == "polling_open":
         issue_entitlements(election)
+    if new_status == "polling_closed":
+        from app.security.integrity import seal_contest
+
+        for contest in election.contests:  # Keane, R19: seal every contest's ballots
+            seal_contest(contest)
     from app.security.audit_security import append_event
 
     append_event("election_transition", "success", actor, "election", election.id,

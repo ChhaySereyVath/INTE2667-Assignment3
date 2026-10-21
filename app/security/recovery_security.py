@@ -12,7 +12,7 @@ from app import db
 from app.models.auth_models import RecoveryRequest, WebAuthnCredential
 from app.models.user import User
 from app.security.auth_security import (issue_token, queue_notification, redeem_token,
-                                        revoke_all_sessions)
+                                        revoke_all_sessions, normalize_username)
 from app.security.crypto import blind_index
 from app.security.shared_security import utcnow
 
@@ -25,7 +25,7 @@ def _latest_request(user, status):
 def start_recovery(username, email):
     """Step 1. Returns nothing: the caller answers the same way whether or not the
     username and email match an account, so it reveals nothing (R09)."""
-    user = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(username=normalize_username(username)).first()
     if user is None or user.status != "active" or user.email_bidx != blind_index(email):
         return
     db.session.add(RecoveryRequest(user_id=user.id, status="awaiting_owner"))
