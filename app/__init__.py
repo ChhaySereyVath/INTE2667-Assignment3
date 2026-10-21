@@ -13,6 +13,8 @@ jwt = JWTManager()
 
 # S13: the app refuses to start without these. There are no default values.
 REQUIRED_SECRETS = ("SECRET_KEY", "JWT_SECRET_KEY", "DATA_ENC_KEY", "BLIND_INDEX_KEY")
+REQUIRED_SECRETS += ("AUDIT_SIGNING_KEY", "ACTION_SIGNING_KEY")  # Keane: R14, R15, R19 signatures
+REQUIRED_SECRETS += ("BALLOT_KEY",)  # Yufei: R01 encryption of ballot preferences
 
 
 def create_app(test_config=None):
@@ -24,6 +26,9 @@ def create_app(test_config=None):
     app.config.from_mapping(
         SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///evp.db"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        # R06/R17 (Yufei): when two requests write at once, the second WAITS (up to 30 s)
+        # for SQLite's lock instead of failing at once with "database is locked"
+        SQLALCHEMY_ENGINE_OPTIONS={"connect_args": {"timeout": 30}},
         MAX_CONTENT_LENGTH=64 * 1024,  # R06: reject request bodies over 64 KB
         # R05: one full federal term (3 years) plus a year's margin
         HISTORY_RETENTION_DAYS=4 * 365,
@@ -60,7 +65,11 @@ def create_app(test_config=None):
         BACKUP_DIR="backups",
         BACKUP_RETENTION_DAYS=90,
         RESTORE_REPORT_DIR="docs/restore-reports",
-        BACKUP_KEY=os.environ.get("BACKUP_KEY")
+        BACKUP_KEY=os.environ.get("BACKUP_KEY"),
+        # R14: signed anchors of the audit trail live OUTSIDE the database
+        AUDIT_ANCHOR_FILE="anchors/audit-anchors.jsonl",
+        # R06: Flask-Limiter reads this. Tests switch it off unless they test R06.
+        RATELIMIT_ENABLED=True,
     )
     for name in REQUIRED_SECRETS:
         app.config[name] = os.environ.get(name)
@@ -74,6 +83,9 @@ def create_app(test_config=None):
 
     db.init_app(app)
     jwt.init_app(app)
+    from app.security.redaction import install_redaction
+    install_redaction(app)
+
     from app.security.shared_security import register_security
     register_security(app) # S03: shared error handlers and security headers
 
@@ -92,11 +104,31 @@ def create_app(test_config=None):
     app.cli.add_command(verify_backup_command)
     app.cli.add_command(restore_command)
 
+    from app.security.election_backup import restore_status_command
+    app.cli.add_command(restore_status_command)
+
     from app.security.enrollment_security import purge_history_command
     app.cli.add_command(purge_history_command)
 
+    from app.security.election_security import seed_election_command
+    app.cli.add_command(seed_election_command)
+
+    from app.security.load_test import load_test_command
+    app.cli.add_command(load_test_command)
+
+    from app.security.demo_data import demo_voters_command, demo_votes_command
+    app.cli.add_command(demo_voters_command)
+    app.cli.add_command(demo_votes_command)
+
     from app.routes.recovery import recovery_bp
     app.register_blueprint(recovery_bp, url_prefix="/auth/recovery")
+
+    from app.security.audit_security import audit_anchor_command, audit_verify_command
+    app.cli.add_command(audit_anchor_command)
+    app.cli.add_command(audit_verify_command)
+
+    from app.security.signed_actions import verify_actions_command
+    app.cli.add_command(verify_actions_command)
 
     # --- Blueprints: each subsystem registers its own here ---
     from app.routes.auth import auth_bp
@@ -106,8 +138,26 @@ def create_app(test_config=None):
     app.register_blueprint(enrollment_bp, url_prefix="/enrollment")
     app.register_blueprint(enrollment_pages_bp)
 
+    from app.routes.audit import audit_bp
+    app.register_blueprint(audit_bp)
+    
+    from app.routes.elections import elections_bp
+    app.register_blueprint(elections_bp)
+
+    from app.routes.voting import voting_bp
+    app.register_blueprint(voting_bp)
+
+    from app.routes.candidates import candidates_bp
+    app.register_blueprint(candidates_bp)
+
+    from app.routes.results import results_bp
+    app.register_blueprint(results_bp)
+    
     from app.routes.pages import pages_bp
     app.register_blueprint(pages_bp)
+
+    from app.security.rate_limits import install_rate_limits
+    install_rate_limits(app)
 
     with app.app_context():
         from app import models
@@ -115,5 +165,8 @@ def create_app(test_config=None):
         
         from app.models.enrollment_models import protect_history
         protect_history(db.engine, app.config["HISTORY_RETENTION_DAYS"])
+        
+        from app.models.audit_models import protect_audit
+        protect_audit(db.engine)
 
     return app

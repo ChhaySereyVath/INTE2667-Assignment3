@@ -14,8 +14,20 @@
   {% if can_admin %}
   <p><a class="button" href="{{ url_for('pages.admin_page') }}">Administration</a></p>
   {% endif %}
+  {% if can_count %}
+  <p><a class="button" href="{{ url_for('results.contests_page') }}">Candidates and counts</a></p>
+  {% endif %}
+  {% if can_audit %}
+  <p><a class="button" href="{{ url_for('audit.audit_page') }}">Audit trail</a></p>
+  {% endif %}
   {% if can_staff %}
   <p><a class="button" href="{{ url_for('enrollment_pages.staff_queue_page') }}">Enrolment queue</a></p>
+  {% endif %}
+  {% if can_manage_elections %}
+  <p><a class="button" href="{{ url_for('elections.elections_page') }}">Elections</a></p>
+  {% endif %}
+  {% if can_vote %}
+  <p><a class="button" href="{{ url_for('voting.voting_page') }}">Can I vote?</a></p>
   {% endif %}
   {% if can_enrol %}
   <p><a class="button" href="{{ url_for('enrollment_pages.my_enrolment_page') }}">My enrolment</a></p>

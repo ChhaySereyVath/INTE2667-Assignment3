@@ -149,3 +149,18 @@ def test_the_password_policy_rejects_weak_choices(app):
         assert password_problem("ADMINISTRATOR", "x") == "is too common"  # case does not help
         assert password_problem("newvoter-is-me", "newvoter") == "must not contain your username"
         assert password_problem(None, "x") is not None
+
+# --- usernames are case-insensitive ---
+
+def test_usernames_ignore_capitals(app, client):
+    """R09: 'Alice' and 'alice' are one account: no look-alike second account, and
+    nobody is told 'invalid credentials' for typing a capital."""
+    register(client, username="Alice", email="alice@example.com")
+    with app.app_context():
+        assert User.query.one().username == "alice"  # stored in one form
+    register(client, username="ALICE", email="someone.else@example.com")
+    with app.app_context():
+        assert User.query.count() == 1  # the second one is refused, like any taken name
+    client.post("/auth/activate", json={"token": activation_token(app)})
+    for typed in ("alice", "Alice", " ALICE "):
+        assert login(client, typed, "Correct-Horse-42").status_code == 200, typed

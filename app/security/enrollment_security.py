@@ -52,6 +52,11 @@ def log_refused(user, action, target_type, target_id):
     """R11: 'Unauthorised access attempts are rejected and logged.'"""
     security_log.warning("access_denied actor=%s action=%s target=%s:%s result=denied",
                          user.id, action, target_type, _safe_id(target_id))
+    from app.security.audit_security import append_event
+
+    append_event("access_denied", "denied", user, target_type, _safe_id(target_id),
+                 reason=action)
+    db.session.commit()
 
 def get_scoped_or_404(record_id, user, action):
     """Fetch a record only if this user may use it for this action (R11).
@@ -85,6 +90,13 @@ def record_change(enrolment, actor, action, field, old_value, new_value):
         old_value_enc=encrypt_field(old_value, record_aad("enrolment_history", "old_value", row_id)),
         new_value_enc=encrypt_field(new_value, record_aad("enrolment_history", "new_value", row_id)),
     )
+    # R13: the audit trail says WHO changed WHICH field; the values stay in the
+    # encrypted history only. (Written before the row is added: the trail saves its
+    # event straight away, and the history row must reach the database in ONE insert.)
+    from app.security.audit_security import append_event
+
+    append_event("enrolment_change", "success", actor, "enrolment", enrolment.id,
+                 field=field, reason=action)
     db.session.add(row)
     return row
 

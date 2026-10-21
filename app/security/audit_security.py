@@ -1,0 +1,216 @@
+"""R13/R14: the tamper-evident audit trail.
+
+Every event stores the hash of the event before it, so changing, deleting or
+reordering any event breaks the chain from that point on. Signed "anchors" written to
+a separate file catch the one thing a chain alone cannot: someone rebuilding the
+whole chain from scratch, or cutting events off the end.
+"""
+import hashlib
+import json
+import logging
+from pathlib import Path
+
+import click
+from flask import current_app
+from flask.cli import with_appcontext
+from sqlalchemy import select, update
+
+from app import db
+from app.models.audit_models import AUDIT_ACTIONS, GENESIS_HASH, RESULTS, AuditEvent, AuditHead
+from app.security.shared_security import utcnow
+from app.security.signing import canonical_json
+
+
+def _hashable_fields(event):
+    """Everything about an event except its own hash."""
+    return {
+        "seq": event.seq,
+        "occurred_at": event.occurred_at.isoformat(),
+        "actor_id": event.actor_id,
+        "actor_role": event.actor_role,
+        "action": event.action,
+        "target_type": event.target_type,
+        "target_id": event.target_id,
+        "result": event.result,
+        "details": event.details,
+    }
+
+
+def compute_hash(prev_hash, event):
+    """R14: record_hash = SHA-256(previous hash + this event as canonical JSON)."""
+    data = prev_hash + canonical_json(_hashable_fields(event))
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def append_event(action, result, actor=None, target_type=None, target_id=None, **details):
+    """R13: add one event to the trail. The caller commits, so the event is saved in
+    the same transaction as the change it describes (both happen, or neither)."""
+    if action not in AUDIT_ACTIONS or result not in RESULTS:
+        raise ValueError("unknown audit action or result")
+    # R14: write to the head row FIRST. The database lets one request at a time past
+    # this line, so each event gets its own seq and the true previous hash.
+    db.session.execute(update(AuditHead).where(AuditHead.id == 1).values(seq=AuditHead.seq + 1))
+    seq, prev_hash = db.session.execute(
+        select(AuditHead.seq, AuditHead.record_hash).where(AuditHead.id == 1)).one()
+    event = AuditEvent(
+        seq=seq,
+        occurred_at=utcnow(),
+        actor_id=actor.id if actor is not None else None,
+        actor_role=actor.role if actor is not None else None,
+        action=action,
+        target_type=target_type,
+        target_id=str(target_id) if target_id is not None else None,
+        result=result,
+        details=canonical_json(clean_details(details)),
+        prev_hash=prev_hash,
+    )
+    event.record_hash = compute_hash(event.prev_hash, event)
+    db.session.execute(update(AuditHead).where(AuditHead.id == 1).values(record_hash=event.record_hash))
+    db.session.add(event)
+    db.session.flush()  # the next append in this request sees this one
+    return event
+
+# R13: the only detail keys an event may carry. Anything else is dropped before it is
+# stored, so a password, token, key or ballot choice can never end up in the trail,
+# even if a caller passes one by mistake.
+ALLOWED_DETAILS = frozenset({
+    "reason", "permission", "state", "role", "previous_role", "new_role", "field",
+    "decision", "status", "from_status", "to_status", "election_id", "contest_id",
+    "contest_type", "count", "problems", "outcome",
+})
+MAX_DETAIL_LENGTH = 100
+
+
+def clean_details(details):
+    """Keep allowlisted keys with short, simple values only."""
+    cleaned = {}
+    for key, value in details.items():
+        if key not in ALLOWED_DETAILS:
+            continue
+        if value is None or isinstance(value, (bool, int)):
+            cleaned[key] = value
+        else:
+            cleaned[key] = str(value)[:MAX_DETAIL_LENGTH]
+    return cleaned
+
+def chain_problems(events, head):
+    """R14: recompute a chain. `events` in seq order; `head` is the end marker row.
+    Returns a list of problems; empty means intact. (Yufei's restore test reuses this
+    on a restored backup, so it takes plain rows rather than querying itself.)"""
+    problems = []
+    expected_prev, expected_seq = GENESIS_HASH, 1
+    for event in events:
+        if event.seq != expected_seq:
+            problems.append(f"event {expected_seq} is missing")  # deleted, or seq edited
+            expected_seq = event.seq
+        if event.prev_hash != expected_prev:
+            problems.append(f"event {event.seq} does not follow the event before it")
+        if compute_hash(event.prev_hash, event) != event.record_hash:
+            problems.append(f"event {event.seq} has been altered")
+        expected_prev, expected_seq = event.record_hash, event.seq + 1
+    if head is not None and (head.seq != expected_seq - 1 or head.record_hash != expected_prev):
+        problems.append(f"the trail should end at event {head.seq} but ends at event {expected_seq - 1}")
+    return problems
+
+
+def verify_chain():
+    """R14: check the live trail."""
+    return chain_problems(AuditEvent.query.order_by(AuditEvent.seq).all(), db.session.get(AuditHead, 1))
+
+# --- signed anchors, kept outside the database --------------------------------
+
+def _anchor_file():
+    return Path(current_app.config["AUDIT_ANCHOR_FILE"])
+
+
+def write_anchor():
+    """R14: sign the current end of the chain and append it to the anchor file.
+
+    The file lives outside the database, and only the holder of AUDIT_SIGNING_KEY can
+    write a valid line, so someone who can edit the database still cannot make the
+    anchors agree with a rewritten chain. Returns the anchor, or None if no events.
+    """
+    from app.security.signing import sign
+
+    last = AuditEvent.query.order_by(AuditEvent.seq.desc()).first()
+    if last is None:
+        return None
+    anchor = {"seq": last.seq, "record_hash": last.record_hash, "anchored_at": utcnow().isoformat()}
+    anchor["signature"] = sign(anchor, "AUDIT_SIGNING_KEY")
+    path = _anchor_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(anchor) + "\n")
+    return anchor
+
+
+def verify_anchors():
+    """R14: every anchor must carry a valid signature AND still match the database."""
+    from app.security.signing import public_key_hex, verify
+
+    path = _anchor_file()
+    if not path.exists():
+        return []
+    public = public_key_hex("AUDIT_SIGNING_KEY")
+    problems = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        try:
+            anchor = json.loads(line)
+            signature = anchor.pop("signature")
+        except (ValueError, KeyError, AttributeError):
+            problems.append(f"anchor {number} is unreadable")
+            continue
+        if not verify(anchor, signature, public):
+            problems.append(f"anchor {number} has an invalid signature")
+            continue
+        event = db.session.get(AuditEvent, anchor["seq"])
+        if event is None:
+            problems.append(f"anchor {number}: event {anchor['seq']} is gone")
+        elif event.record_hash != anchor["record_hash"]:
+            problems.append(f"anchor {number}: event {anchor['seq']} no longer matches")
+    return problems
+
+# --- alerts -----------------------------------------------------------------
+
+security_log = logging.getLogger("evp.security")
+
+
+def raise_alert(kind, message):
+    """R14: a failed verification must not pass quietly. It is stored, logged as
+    CRITICAL (where monitoring picks it up), and written to the trail itself."""
+    from app.models.audit_models import SecurityAlert
+
+    db.session.add(SecurityAlert(kind=kind, message=message[:200]))
+    security_log.critical("security_alert kind=%s message=%s", kind, message[:200])
+
+
+def verify_audit_trail(actor=None):
+    """Check the chain and the anchors. On any problem, raise an alert. Returns problems."""
+    problems = verify_chain() + verify_anchors()
+    if problems:
+        raise_alert("audit_tampering", f"{len(problems)} problem(s): {problems[0]}")
+        append_event("audit_verify_failed", "failure", actor, problems=len(problems))
+    else:
+        append_event("audit_verified", "success", actor)
+    db.session.commit()
+    return problems
+
+
+@click.command("audit-anchor")
+@with_appcontext
+def audit_anchor_command():
+    """Sign the end of the audit trail into the anchor file (run every few minutes)."""
+    anchor = write_anchor()
+    click.echo(f"Anchored event {anchor['seq']}." if anchor else "No events yet.")
+
+
+@click.command("audit-verify")
+@with_appcontext
+def audit_verify_command():
+    """Check the audit trail against its hashes and anchors."""
+    problems = verify_audit_trail()
+    if problems:
+        for problem in problems:
+            click.echo(f"FAIL: {problem}")
+        raise SystemExit(1)
+    click.echo("Audit trail intact.")

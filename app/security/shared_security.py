@@ -56,6 +56,8 @@ ROLE_PERMISSIONS = {
         "enrolment:self:read",
         "enrolment:self:enrol",
         "enrolment:self:update_address",
+        "eligibility:self:check",  # Yufei: R16
+        "ballot:submit",  # Yufei: R17
     }),
     "aec_employee": frozenset({
         "enrolment:staff:read",
@@ -66,6 +68,11 @@ ROLE_PERMISSIONS = {
         "enrolment:staff:register",
         "enrolment:staff:approve",
         "enrolment:history:read_sensitive",
+        "election:manage",  # Yufei: create elections, open and close polling
+        "candidate:manage",  # Keane: R15 signed candidate changes
+        "count:run",  # Keane: R19 counts only after integrity checks
+        "count:exclude",  # Keane: R15 two-person recount exclusions
+        "result:approve",  # Keane: R15 a second delegate approves
     }),
     "administrator": frozenset({
         "admin:user:create",
@@ -74,6 +81,7 @@ ROLE_PERMISSIONS = {
     }),
     "auditor": frozenset({
         "audit:log:read",
+        "audit:verify",
     }),
 }
 
@@ -83,6 +91,7 @@ PRIVILEGED_PERMISSIONS = frozenset(
     ROLE_PERMISSIONS["aec_employee"]
     | ROLE_PERMISSIONS["commissioner_delegate"]
     | ROLE_PERMISSIONS["administrator"]
+    | ROLE_PERMISSIONS["auditor"]  # R08/R13: the audit trail is privileged too
 )
 
 
@@ -179,15 +188,25 @@ def permission_required(permission):
         @wraps(view)
         def inner(*args, current_user, **kwargs):
             if not has_permission(current_user, permission):
+                _audit_denied(current_user, permission, "no permission")
                 return jsonify({"error": GENERIC_ERRORS[403]}), 403
             if permission in PRIVILEGED_PERMISSIONS and not _mfa_satisfied(current_user):
                 # R08: a privileged action needs more than a password
+                _audit_denied(current_user, permission, "mfa required")
                 return jsonify({"error": GENERIC_ERRORS[403]}), 403
             return view(*args, current_user=current_user, **kwargs)
 
         return login_required(inner)
 
     return decorator
+
+def _audit_denied(user, permission, reason):
+    """R11/R13: every refused permission check goes into the audit trail."""
+    from app.security.audit_security import append_event
+
+    append_event("access_denied", "denied", user, "permission", None,
+                 permission=permission, reason=reason)
+    db.session.commit()
 
 def _mfa_satisfied(user):
     """R08: staff and admin sessions must be MFA-verified. Citizens are not asked."""
@@ -211,6 +230,14 @@ def privileged_required(view):
 def register_security(app):
     """Attach the shared error handlers and security headers to the app."""
 
+    @app.before_request
+    def assign_request_id():
+        """R02: every request gets a random id. Error responses show only this id;
+        the server log has the details under the same id."""
+        from app.security.redaction import new_request_id
+
+        g.request_id = new_request_id()
+    
     @app.before_request
     def check_request_origin():
         """R21: 'State-changing requests require valid CSRF or request-origin evidence.'
@@ -238,10 +265,11 @@ def register_security(app):
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
-        db.session.rollback()  # undo any half-finished database work
-        app.logger.exception("Unhandled error")  # details stay in the server log only
-        return jsonify({"error": GENERIC_ERRORS[500]}), 500
-
+        db.session.rollback()
+        # R02: the details go to the (redacted) server log, never to the client
+        app.logger.exception("Unhandled error")
+        return jsonify({"error": GENERIC_ERRORS[500], "request_id": g.get("request_id")}), 500
+    
     @app.after_request
     def add_security_headers(response):
         # S15: only load scripts, styles and images from our own site
@@ -249,6 +277,9 @@ def register_security(app):
             "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
+        if g.get("request_id"):
+            response.headers["X-Request-ID"] = g.request_id
+        
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
         if request.is_secure:

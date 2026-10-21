@@ -4,7 +4,9 @@ from flask import Blueprint, jsonify, request
 from app.security.recovery_security import confirm_owner, start_recovery, decide, pending_requests, complete_reset
 from app.security.validators import EMAIL_RE, POSTCODE_RE, validate
 from app.security.shared_security import permission_required
-from app.security.auth_security import password_problem
+from app import db
+from app.security.audit_security import append_event
+from app.security.auth_security import password_problem, peek_token
 
 recovery_bp = Blueprint("recovery", __name__)
 
@@ -72,9 +74,15 @@ def decide_recovery(current_user, request_id):
         return jsonify({"error": "Invalid request"}), 400
     outcome = decide(request_id, current_user, data["decision"])
     if outcome == "self":
+        append_event("recovery_decision", "denied", current_user, "recovery", request_id,
+                     reason="own request")
+        db.session.commit()
         return jsonify({"error": "Access denied"}), 403
     if outcome == "not_found":
         return jsonify({"error": "Not found"}), 404
+    append_event("recovery_decision", "success", current_user, "recovery", request_id,
+                 decision=data["decision"])
+    db.session.commit()
     return jsonify({"message": f"Recovery {data['decision']}"}), 200
 
 
@@ -84,8 +92,11 @@ def reset_password():
     ok, data, _ = validate(request.get_json(silent=True), RESET_SCHEMA)
     if not ok:
         return jsonify({"error": "Invalid request"}), 400
-    # check the password BEFORE using the link, so a weak choice does not burn it
-    problem = password_problem(data["new_password"])
+    # check the password BEFORE using the link, so a weak choice does not burn it.
+    # peek_token finds whose link it is without using it, so the same rules apply as
+    # at registration, including "must not contain your username" (R09)
+    owner = peek_token(data["token"], "recovery_reset")
+    problem = password_problem(data["new_password"], owner.username if owner else "")
     if problem is not None:
         return jsonify({"error": "Invalid request", "fields": {"new_password": problem}}), 400
     if not complete_reset(data["token"], data["new_password"]):
