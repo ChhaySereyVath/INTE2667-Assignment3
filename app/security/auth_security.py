@@ -234,7 +234,7 @@ def clear_login_failures(username, ip):
 
 def _alert_account_under_attack(username):
     """R09: tell the owner rather than locking them out permanently."""
-    user = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(username=normalize_username(username)).first()
     if user is not None:
         db.session.add(Notification(
             user_id=user.id,
